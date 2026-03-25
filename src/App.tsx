@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -8,15 +8,16 @@ import { ScrollArea } from "./components/ui/scroll-area";
 import { Checkbox } from "./components/ui/checkbox";
 import { cn } from "./lib/utils";
 import { CharacterCard, parseFile, parsePdfToText, parseDocxToText } from "./lib/parser";
-import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype } from "./lib/api";
+import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData } from "./lib/api";
 import { DEFAULT_GUIDE_CONTENT } from "./lib/defaultGuide";
 import { CardTemplate, DEFAULT_TEMPLATES } from "./lib/templates";
 import ReactMarkdown from "react-markdown";
 import { motion, AnimatePresence } from "motion/react";
-// @ts-ignore
+import { toPng } from "html-to-image";
 import html2pdf from "html2pdf.js";
+import UniverseMap from "./components/UniverseMap";
 
-type ViewState = "upload" | "generate" | "saved" | "create" | "settings";
+type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "settings";
 
 interface GuideVersion {
   id: string;
@@ -90,12 +91,17 @@ export default function App() {
   const [guides, setGuides] = useState<SavedGuide[]>([]);
   const [selectedGuides, setSelectedGuides] = useState<Set<string>>(new Set());
 
+  // Universe Map State
+  const [universeData, setUniverseData] = useState<UniverseData | null>(null);
+  const [isExtractingUniverse, setIsExtractingUniverse] = useState(false);
+  const [universeSelectedGuide, setUniverseSelectedGuide] = useState<string>("");
+
   // Card Forge State
   const [forgeName, setForgeName] = useState("");
   const [forgeConcept, setForgeConcept] = useState("");
   const [forgeSlots, setForgeSlots] = useState<{ name: string, description: string, value: string }[]>([]);
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
-  const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>(DEFAULT_TEMPLATES[0].id);
+  const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>("");
   const [isForging, setIsForging] = useState(false);
   const [isExtractingSlots, setIsExtractingSlots] = useState(false);
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
@@ -310,6 +316,55 @@ export default function App() {
     setCards((prev) => prev.filter((_, i) => i !== index));
   };
 
+  const handleImageUpload = (index: number, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      setCards((prev) => {
+        const newCards = [...prev];
+        newCards[index] = { ...newCards[index], image: dataUrl };
+        return newCards;
+      });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const exportCardJson = (card: CharacterCard) => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(card, null, 2));
+    const downloadAnchorNode = document.createElement("a");
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", `${card.name || "character"}.json`);
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
+  const [exportingCard, setExportingCard] = useState<CharacterCard | null>(null);
+
+  useEffect(() => {
+    if (exportingCard) {
+      setTimeout(async () => {
+        const element = document.getElementById("export-card-container");
+        if (element) {
+          try {
+            const dataUrl = await toPng(element, { cacheBust: true, backgroundColor: '#ffffff', pixelRatio: 2 });
+            const link = document.createElement("a");
+            link.download = `${exportingCard.name || "character"}.png`;
+            link.href = dataUrl;
+            link.click();
+          } catch (err) {
+            console.error("Failed to export PNG", err);
+          } finally {
+            setExportingCard(null);
+          }
+        }
+      }, 100);
+    }
+  }, [exportingCard]);
+
   const handleGenerate = async () => {
     if (cards.length === 0) return;
     setIsGenerating(true);
@@ -479,6 +534,23 @@ export default function App() {
     }
   }, [forgeSelectedGuide, provider, apiKeys, guides]);
 
+  const handleExtractUniverse = async () => {
+    if (!universeSelectedGuide) return;
+    const guide = guides.find(g => g.id === universeSelectedGuide);
+    if (!guide) return;
+
+    setIsExtractingUniverse(true);
+    try {
+      const data = await extractUniverse(provider, apiKeys, guide.content, apiModels[provider]);
+      setUniverseData(data);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to extract universe data.");
+    } finally {
+      setIsExtractingUniverse(false);
+    }
+  };
+
   const handleForgeCard = async () => {
     if (!forgeName || !forgeConcept || !forgeSelectedGuide) return;
     
@@ -568,6 +640,7 @@ export default function App() {
           <NavButton view="generate" icon={FileText} label="Current Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
           <NavButton view="create" icon={Wand2} label="Card Forge" currentView={view} setView={setView} />
+          <NavButton view="universe" icon={Network} label="Universe Map" currentView={view} setView={setView} />
           <NavButton view="settings" icon={Settings} label="Configuration" currentView={view} setView={setView} />
         </nav>
       </div>
@@ -650,14 +723,58 @@ export default function App() {
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {cards.map((card, i) => (
-                          <div key={i} className="group relative bg-white border border-[#e5e4e2] rounded-2xl p-5 shadow-sm hover:shadow-md transition-all">
-                            <h4 className="font-serif font-medium text-lg truncate pr-8">{card.name || "Unknown"}</h4>
-                            <p className="text-xs text-slate-500 mt-1 truncate">
-                              {card.creator ? `By ${card.creator}` : "Unknown Creator"}
-                            </p>
+                          <div key={i} className="group relative bg-white border border-[#e5e4e2] rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between min-h-[120px]">
+                            <div className="flex gap-4">
+                              <div 
+                                className="relative w-16 h-16 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0 border border-[#e5e4e2] flex items-center justify-center group/image cursor-pointer" 
+                                onClick={(e) => { e.stopPropagation(); document.getElementById(`image-upload-${i}`)?.click(); }}
+                                title="Upload Character Image"
+                              >
+                                {card.image ? (
+                                  <img src={card.image} alt={card.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <ImageIcon className="w-6 h-6 text-slate-400" />
+                                )}
+                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-opacity">
+                                  <Upload className="w-4 h-4 text-white" />
+                                </div>
+                                <input 
+                                  type="file" 
+                                  id={`image-upload-${i}`} 
+                                  className="hidden" 
+                                  accept="image/*"
+                                  onChange={(e) => handleImageUpload(i, e)}
+                                />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <h4 className="font-serif font-medium text-lg truncate pr-8">{card.name || "Unknown"}</h4>
+                                <p className="text-xs text-slate-500 mt-1 truncate">
+                                  {card.creator ? `By ${card.creator}` : "Unknown Creator"}
+                                </p>
+                              </div>
+                            </div>
+                            
+                            <div className="mt-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={(e) => { e.stopPropagation(); exportCardJson(card); }}
+                                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-600 transition-colors"
+                                title="Export JSON"
+                              >
+                                <FileJson className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setExportingCard(card); }}
+                                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-600 transition-colors"
+                                title="Export PNG"
+                              >
+                                {exportingCard === card ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+                              </button>
+                            </div>
+
                             <button
                               className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
                               onClick={(e) => { e.stopPropagation(); removeCard(i); }}
+                              title="Delete Card"
                             >
                               <Trash2 className="w-4 h-4" />
                             </button>
@@ -958,8 +1075,8 @@ export default function App() {
 
                       <div className="space-y-2">
                         <Label htmlFor="templateSelect" className="text-slate-700 font-medium flex items-center">
-                          Card Template <span className="text-red-500 ml-1">*</span>
-                          <InfoTooltip text="The structural template used to format the character card's fields." />
+                          Card Template <span className="text-slate-400 font-normal ml-2 text-xs">(Optional)</span>
+                          <InfoTooltip text="Optional structural template to format the character card's fields. If omitted, the style guide will dictate the format." />
                         </Label>
                         <select
                           id="templateSelect"
@@ -967,6 +1084,7 @@ export default function App() {
                           onChange={(e) => setForgeSelectedTemplate(e.target.value)}
                           className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
                         >
+                          <option value="">None (Use Style Guide)</option>
                           {DEFAULT_TEMPLATES.map((t) => (
                             <option key={t.id} value={t.id}>{t.name}</option>
                           ))}
@@ -1135,6 +1253,78 @@ export default function App() {
                         </div>
                       )}
                     </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* UNIVERSE MAP VIEW */}
+              {view === "universe" && (
+                <motion.div
+                  key="universe"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6 md:space-y-8 h-full flex flex-col"
+                >
+                  <div className="border-b border-[#e5e4e2] pb-6 shrink-0">
+                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Universe Map</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                      Visualize character relationships and the NPC-to-Protagonist pipeline.
+                    </p>
+                  </div>
+
+                  <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+                    <div className="flex flex-col md:flex-row gap-4 items-end">
+                      <div className="space-y-2 flex-1 w-full">
+                        <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
+                          Select Style Guide to Analyze
+                        </Label>
+                        <select
+                          id="universeGuideSelect"
+                          value={universeSelectedGuide}
+                          onChange={(e) => setUniverseSelectedGuide(e.target.value)}
+                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                        >
+                          <option value="" disabled>Select a saved guide...</option>
+                          {guides.map((g) => (
+                            <option key={g.id} value={g.id}>{g.title}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <Button 
+                        onClick={handleExtractUniverse} 
+                        disabled={isExtractingUniverse || !universeSelectedGuide} 
+                        className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
+                      >
+                        {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
+                        Extract Universe
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 min-h-[500px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
+                    {isExtractingUniverse ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/80 backdrop-blur-sm z-20">
+                        <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                        <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Analyzing Relationships...</h4>
+                        <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
+                          Extracting characters, shared universes, and pipeline progressions.
+                        </p>
+                      </div>
+                    ) : universeData && universeData.nodes.length > 0 ? (
+                      <UniverseMap data={universeData} />
+                    ) : (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
+                        <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
+                          <Network className="w-6 h-6 text-slate-400" />
+                        </div>
+                        <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
+                        <p className="text-slate-500 mt-2 max-w-xs text-sm">
+                          Select a style guide and click Extract Universe to visualize character relationships.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -1334,6 +1524,52 @@ export default function App() {
               )}
 
             </AnimatePresence>
+
+            {/* Hidden Export Container */}
+            {exportingCard && (
+              <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none">
+                <div id="export-card-container" className="bg-[#f9f8f6] p-8 rounded-3xl shadow-xl w-[800px] font-sans text-slate-900 border border-[#e5e4e2]">
+                  <div className="border-b border-[#e5e4e2] pb-6 mb-6 flex items-center gap-6">
+                    {exportingCard.image && (
+                      <div className="w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 border-2 border-white shadow-md">
+                        <img src={exportingCard.image} alt={exportingCard.name} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <div>
+                      <h1 className="text-4xl font-serif font-bold text-[#8B3A3A] mb-2">{exportingCard.name || "Unknown Character"}</h1>
+                      {exportingCard.creator && <p className="text-sm font-medium text-slate-500 uppercase tracking-widest">By {exportingCard.creator}</p>}
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-6">
+                    {exportingCard.description && (
+                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Description</h3>
+                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.description}</div>
+                      </div>
+                    )}
+                    {exportingCard.personality && (
+                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Personality</h3>
+                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.personality}</div>
+                      </div>
+                    )}
+                    {exportingCard.scenario && (
+                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Scenario</h3>
+                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.scenario}</div>
+                      </div>
+                    )}
+                    {exportingCard.first_mes && (
+                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">First Message</h3>
+                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-4 rounded-xl border border-[#e5e4e2]">{exportingCard.first_mes}</div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </ScrollArea>
       </div>

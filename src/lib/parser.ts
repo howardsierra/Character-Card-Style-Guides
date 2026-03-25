@@ -17,6 +17,7 @@ export interface CharacterCard {
   creator?: string;
   character_version?: string;
   alternate_greetings?: string[];
+  image?: string;
 }
 
 export async function parseDocxToText(file: File): Promise<string> {

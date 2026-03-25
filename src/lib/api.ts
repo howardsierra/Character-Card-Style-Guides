@@ -436,6 +436,134 @@ ${styleGuide}`;
   }
 }
 
+export interface UniverseNode {
+  id: string;
+  name: string;
+  group: string;
+  description?: string;
+}
+
+export interface UniverseLink {
+  source: string;
+  target: string;
+  type: "relationship" | "pipeline";
+  label?: string;
+}
+
+export interface UniverseData {
+  nodes: UniverseNode[];
+  links: UniverseLink[];
+}
+
+export async function extractUniverse(
+  provider: AIProvider,
+  keys: ApiKeys,
+  styleGuide: string,
+  model?: string
+): Promise<UniverseData> {
+  const prompt = `Analyze the following Style Guide, specifically looking for sections like "Relationship & Supporting Cast Writing" or "The NPC-to-Protagonist Pipeline" or "Shared Universes".
+Extract all mentioned characters and their relationships, as well as the "pipeline" progression (e.g., Character A was an NPC in Character B's story, then got their own card).
+
+Return ONLY a valid JSON object with two arrays: "nodes" and "links".
+- "nodes" should be an array of objects: { "id": "unique_id", "name": "Character Name", "group": "Universe/Group Name", "description": "Short description" }
+- "links" should be an array of objects: { "source": "source_node_id", "target": "target_node_id", "type": "relationship" or "pipeline", "label": "Short description of link" }
+
+For "pipeline" links, the source is the original character/card where they appeared as an NPC, and the target is the character who was promoted.
+For "relationship" links, it's just a connection between two characters in the same universe.
+
+STYLE GUIDE:
+${styleGuide}`;
+
+  const parseResponse = (text: string): UniverseData => {
+    try {
+      const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+      const jsonStr = match ? match[1] : text;
+      return JSON.parse(jsonStr.trim());
+    } catch (e) {
+      console.error("Failed to parse AI response as JSON:", text);
+      return { nodes: [], links: [] };
+    }
+  };
+
+  try {
+    if (provider === "gemini") {
+      const ai = new GoogleGenAI({ apiKey: keys.gemini || "dummy" });
+      const response = await ai.models.generateContent({
+        model: model || "gemini-3.1-flash-preview",
+        contents: prompt,
+        config: { responseMimeType: "application/json" }
+      });
+      return parseResponse(response.text || "");
+    } else if (provider === "anthropic") {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": keys.anthropic,
+          "anthropic-version": "2023-06-01",
+          "anthropic-dangerous-direct-browser-access": "true"
+        },
+        body: JSON.stringify({
+          model: model || "claude-3-5-sonnet-20240620",
+          max_tokens: 4000,
+          messages: [{ role: "user", content: prompt }]
+        })
+      });
+      const data = await response.json();
+      return parseResponse(data.content[0].text);
+    } else if (provider === "openai") {
+      const response = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${keys.openai}`
+        },
+        body: JSON.stringify({
+          model: model || "gpt-4o",
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" }
+        })
+      });
+      const data = await response.json();
+      return parseResponse(data.choices[0].message.content);
+    } else if (provider === "openrouter") {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${keys.openrouter}`
+        },
+        body: JSON.stringify({
+          model: model || "anthropic/claude-3.5-sonnet",
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" }
+        })
+      });
+      const data = await response.json();
+      return parseResponse(data.choices[0].message.content);
+    } else if (provider === "custom") {
+      const response = await fetch(keys.customEndpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${keys.customKey}`
+        },
+        body: JSON.stringify({
+          model: model || "",
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" }
+        })
+      });
+      const data = await response.json();
+      return parseResponse(data.choices[0].message.content);
+    }
+    return { nodes: [], links: [] };
+  } catch (error) {
+    console.error("Error extracting universe:", error);
+    return { nodes: [], links: [] };
+  }
+}
+
 export async function suggestArchetype(
   provider: AIProvider,
   keys: ApiKeys,
