@@ -50,14 +50,14 @@ function NavButton({ view, icon: Icon, label, currentView, setView }: any) {
     <button
       onClick={() => setView(view)}
       className={cn(
-        "w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all duration-300",
+        "flex-none md:w-full flex items-center gap-2 md:gap-3 px-3 py-2 md:px-4 md:py-3 rounded-xl text-sm font-medium transition-all duration-300",
         isActive 
           ? "bg-white text-[#8B3A3A] shadow-sm border border-[#e5e4e2]" 
           : "text-slate-600 hover:bg-white/50 hover:text-slate-900"
       )}
     >
-      <Icon className={cn("w-4 h-4", isActive ? "text-[#8B3A3A]" : "text-slate-400")} />
-      {label}
+      <Icon className={cn("w-4 h-4 md:w-5 md:h-5", isActive ? "text-[#8B3A3A]" : "text-slate-400")} />
+      <span className="whitespace-nowrap">{label}</span>
     </button>
   );
 }
@@ -549,19 +549,21 @@ export default function App() {
   };
 
   return (
-    <div className="flex h-screen w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
-      {/* Sidebar */}
-      <div className="w-72 bg-[#f9f8f6] border-r border-[#e5e4e2] flex flex-col z-10">
-        <div className="p-8">
-          <h1 className="text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
-            StyleForge
-          </h1>
-          <p className="text-xs font-medium tracking-widest uppercase text-slate-500 mt-2">
-            Authorial Voice Engine
-          </p>
+    <div className="flex flex-col md:flex-row h-screen w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
+      {/* Sidebar / Topbar */}
+      <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2] flex flex-col z-10 shrink-0">
+        <div className="p-4 md:p-8 flex justify-between items-center md:block">
+          <div>
+            <h1 className="text-2xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
+              StyleForge
+            </h1>
+            <p className="hidden md:block text-xs font-medium tracking-widest uppercase text-slate-500 mt-2">
+              Authorial Voice Engine
+            </p>
+          </div>
         </div>
         
-        <nav className="flex-1 px-4 space-y-1">
+        <nav className="flex-row md:flex-col overflow-x-auto md:overflow-x-visible flex-none md:flex-1 px-2 md:px-4 pb-2 md:pb-0 space-x-2 md:space-x-0 md:space-y-1 flex no-scrollbar">
           <NavButton view="upload" icon={Upload} label="Corpus Ingestion" currentView={view} setView={setView} />
           <NavButton view="generate" icon={FileText} label="Current Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
@@ -572,7 +574,7 @@ export default function App() {
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        <ScrollArea className="flex-1 px-12 py-10">
+        <ScrollArea className="flex-1 px-4 py-6 md:px-12 md:py-10">
           <div className="max-w-5xl mx-auto">
             <AnimatePresence mode="wait">
               
@@ -584,24 +586,24 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
-                  className="space-y-8"
+                  className="space-y-6 md:space-y-8"
                 >
                   <div className="space-y-2">
-                    <h2 className="text-5xl font-serif font-light tracking-tight text-slate-900">Corpus Ingestion</h2>
-                    <p className="text-slate-500 text-lg font-light">
+                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Corpus Ingestion</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light">
                       Upload character cards to establish the authorial baseline. A minimum of 15 cards is recommended for accurate style extraction.
                     </p>
                   </div>
 
                   <div 
-                    className="border-dashed border-[1.5px] border-[#d1d0ce] bg-white/50 rounded-3xl p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:border-[#8B3A3A]/30 cursor-pointer"
+                    className="border-dashed border-[1.5px] border-[#d1d0ce] bg-white/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:border-[#8B3A3A]/30 cursor-pointer"
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-6">
-                      <Upload className="w-6 h-6 text-[#8B3A3A]" />
+                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+                      <Upload className="w-5 h-5 md:w-6 md:h-6 text-[#8B3A3A]" />
                     </div>
-                    <h3 className="text-2xl font-serif font-medium text-slate-900">Select Character Cards</h3>
-                    <p className="text-slate-500 mt-2 mb-8 max-w-md">
+                    <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Select Character Cards</h3>
+                    <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
                       Drag and drop PNG, JSON, PDF, or DOCX files here, or click to browse your computer.
                     </p>
                     <input
@@ -613,7 +615,7 @@ export default function App() {
                       onChange={handleFileUpload}
                     />
                     <Button 
-                      className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-8 py-6 text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105" 
+                      className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105" 
                       disabled={isParsing}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -675,62 +677,62 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
-                  className="space-y-8"
+                  className="space-y-6 md:space-y-8"
                 >
-                  <div className="flex items-end justify-between border-b border-[#e5e4e2] pb-6">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-5xl font-serif font-light tracking-tight text-slate-900">
+                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">
                         {currentGuideId ? guides.find(g => g.id === currentGuideId)?.title || "Style Guide" : "Style Guide"}
                       </h2>
-                      <p className="text-slate-500 text-lg font-light">
+                      <p className="text-slate-500 text-base md:text-lg font-light">
                         {currentGuideId ? "Saved authorial profile." : "The synthesized authorial profile."}
                       </p>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-2 md:gap-3">
                       {currentGuideId ? (
                         isEditingGuide ? (
                           <>
-                            <Button variant="outline" onClick={() => setIsEditingGuide(false)} className="rounded-full border-[#e5e4e2] hover:bg-white">
-                              <X className="w-4 h-4 mr-2" />
+                            <Button variant="outline" onClick={() => setIsEditingGuide(false)} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                              <X className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               Cancel
                             </Button>
-                            <Button onClick={updateCurrentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20">
-                              <Save className="w-4 h-4 mr-2" />
+                            <Button onClick={updateCurrentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+                              <Save className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               Save Changes
                             </Button>
                           </>
                         ) : (
                           <>
-                            <Button variant="outline" onClick={() => setShowVersions(!showVersions)} className="rounded-full border-[#e5e4e2] hover:bg-white">
-                              <History className="w-4 h-4 mr-2" />
+                            <Button variant="outline" onClick={() => setShowVersions(!showVersions)} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                              <History className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               History
                             </Button>
-                            <Button variant="outline" onClick={() => { setEditedGuideContent(currentGuide || ""); setIsEditingGuide(true); }} className="rounded-full border-[#e5e4e2] hover:bg-white">
-                              <Pencil className="w-4 h-4 mr-2" />
+                            <Button variant="outline" onClick={() => { setEditedGuideContent(currentGuide || ""); setIsEditingGuide(true); }} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                              <Pencil className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               Edit Guide
                             </Button>
-                            <Button onClick={exportJSON} className="rounded-full border-[#e5e4e2] hover:bg-white" variant="outline">
-                              <Download className="w-4 h-4 mr-2" />
+                            <Button onClick={exportJSON} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4" variant="outline">
+                              <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               JSON
                             </Button>
-                            <Button onClick={exportPDF} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20">
-                              <Download className="w-4 h-4 mr-2" />
+                            <Button onClick={exportPDF} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+                              <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               PDF
                             </Button>
                           </>
                         )
                       ) : (
                         <>
-                          <Button variant="outline" onClick={saveCurrentGuide} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white">
-                            <Check className="w-4 h-4 mr-2" />
+                          <Button variant="outline" onClick={saveCurrentGuide} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                            <Check className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             Save to Library
                           </Button>
-                          <Button onClick={exportJSON} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white" variant="outline">
-                            <Download className="w-4 h-4 mr-2" />
+                          <Button onClick={exportJSON} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4" variant="outline">
+                            <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             JSON
                           </Button>
-                          <Button onClick={exportPDF} disabled={!currentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20">
-                            <Download className="w-4 h-4 mr-2" />
+                          <Button onClick={exportPDF} disabled={!currentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+                            <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             PDF
                           </Button>
                         </>
@@ -739,17 +741,17 @@ export default function App() {
                   </div>
 
                   {showVersions && currentGuideId && (
-                    <div className="bg-white border border-[#e5e4e2] rounded-xl p-6 shadow-sm">
-                      <h3 className="text-xl font-serif font-medium text-slate-900 mb-4">Version History</h3>
-                      <div className="space-y-4 max-h-64 overflow-y-auto pr-2">
+                    <div className="bg-white border border-[#e5e4e2] rounded-xl p-4 md:p-6 shadow-sm">
+                      <h3 className="text-lg md:text-xl font-serif font-medium text-slate-900 mb-4">Version History</h3>
+                      <div className="space-y-3 md:space-y-4 max-h-64 overflow-y-auto pr-2">
                         {guides.find(g => g.id === currentGuideId)?.versions?.length ? (
                           guides.find(g => g.id === currentGuideId)?.versions?.map((v, i, arr) => (
-                            <div key={v.id} className="flex items-center justify-between p-4 border border-[#e5e4e2] rounded-lg bg-slate-50">
+                            <div key={v.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 md:p-4 border border-[#e5e4e2] rounded-lg bg-slate-50 gap-3 sm:gap-0">
                               <div>
-                                <p className="font-medium text-slate-900">Version {arr.length - i}</p>
-                                <p className="text-sm text-slate-500">{new Date(v.date).toLocaleString()}</p>
+                                <p className="font-medium text-slate-900 text-sm md:text-base">Version {arr.length - i}</p>
+                                <p className="text-xs md:text-sm text-slate-500">{new Date(v.date).toLocaleString()}</p>
                               </div>
-                              <Button variant="outline" size="sm" onClick={() => revertToVersion(v)} className="rounded-full text-[#8B3A3A] border-[#e5e4e2] hover:bg-white">
+                              <Button variant="outline" size="sm" onClick={() => revertToVersion(v)} className="rounded-full text-[#8B3A3A] border-[#e5e4e2] hover:bg-white w-full sm:w-auto">
                                 <History className="w-4 h-4 mr-2" />
                                 Revert
                               </Button>
@@ -763,41 +765,41 @@ export default function App() {
                   )}
 
                   {isGenerating ? (
-                    <div className="bg-white border border-[#e5e4e2] rounded-3xl p-24 flex flex-col items-center justify-center text-center shadow-sm">
-                      <Loader2 className="w-12 h-12 text-[#8B3A3A] animate-spin mb-6" />
-                      <h3 className="text-2xl font-serif font-medium text-slate-900">Synthesizing Authorial Voice...</h3>
-                      <p className="text-slate-500 mt-2 max-w-md">
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+                      <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                      <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Synthesizing Authorial Voice...</h3>
+                      <p className="text-slate-500 mt-2 max-w-md text-sm md:text-base">
                         Analyzing prose patterns, dialogue registers, and thematic DNA across {cards.length} cards.
                       </p>
                     </div>
                   ) : currentGuide ? (
                     <div className="bg-white border border-[#e5e4e2] rounded-xl shadow-sm overflow-hidden">
                       {isEditingGuide ? (
-                        <div className="p-8">
+                        <div className="p-4 md:p-8">
                           <Textarea 
                             value={editedGuideContent}
                             onChange={(e) => setEditedGuideContent(e.target.value)}
-                            className="min-h-[800px] font-mono text-sm p-6 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                            className="min-h-[500px] md:min-h-[800px] font-mono text-xs md:text-sm p-4 md:p-6 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                         </div>
                       ) : (
-                        <div className="p-16 min-h-[800px]" ref={guideRef}>
-                          <div className="prose prose-slate max-w-none prose-headings:font-serif prose-headings:font-medium prose-h1:text-center prose-h1:text-5xl prose-h1:text-[#8B3A3A] prose-h1:mb-2 prose-h2:text-[#8B3A3A] prose-h2:border-b prose-h2:border-[#e5e4e2] prose-h2:pb-3 prose-h2:mt-12 prose-h2:text-3xl prose-h3:text-2xl prose-h3:mt-8 prose-p:leading-relaxed prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-900 prose-strong:font-semibold">
+                        <div className="p-6 md:p-16 min-h-[500px] md:min-h-[800px]" ref={guideRef}>
+                          <div className="prose prose-slate max-w-none prose-headings:font-serif prose-headings:font-medium prose-h1:text-center prose-h1:text-3xl md:prose-h1:text-5xl prose-h1:text-[#8B3A3A] prose-h1:mb-2 prose-h2:text-[#8B3A3A] prose-h2:border-b prose-h2:border-[#e5e4e2] prose-h2:pb-2 md:prose-h2:pb-3 prose-h2:mt-8 md:prose-h2:mt-12 prose-h2:text-2xl md:prose-h2:text-3xl prose-h3:text-xl md:prose-h3:text-2xl prose-h3:mt-6 md:prose-h3:mt-8 prose-p:leading-relaxed prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-900 prose-strong:font-semibold">
                             <ReactMarkdown>{currentGuide}</ReactMarkdown>
                           </div>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="bg-white border border-[#e5e4e2] rounded-3xl p-24 flex flex-col items-center justify-center text-center shadow-sm">
-                      <div className="w-20 h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-6">
-                        <FileText className="w-8 h-8 text-slate-400" />
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+                        <FileText className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
                       </div>
-                      <h3 className="text-2xl font-serif font-medium text-slate-900">No Guide Synthesized</h3>
-                      <p className="text-slate-500 mt-2 max-w-md">
+                      <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">No Guide Synthesized</h3>
+                      <p className="text-slate-500 mt-2 max-w-md text-sm md:text-base">
                         Upload character cards and initiate synthesis to generate a style guide.
                       </p>
-                      <Button className="mt-8 rounded-full bg-slate-900 text-white px-8" onClick={() => setView("upload")}>
+                      <Button className="mt-6 md:mt-8 rounded-full bg-slate-900 text-white px-6 md:px-8" onClick={() => setView("upload")}>
                         Return to Upload
                       </Button>
                     </div>
@@ -813,20 +815,20 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
-                  className="space-y-8"
+                  className="space-y-6 md:space-y-8"
                 >
-                  <div className="flex items-end justify-between border-b border-[#e5e4e2] pb-6">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-5xl font-serif font-light tracking-tight text-slate-900">Library</h2>
-                      <p className="text-slate-500 text-lg font-light">
+                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Library</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light">
                         Archived style guides and synthesis history.
                       </p>
                     </div>
-                    <div className="flex gap-3">
+                    <div className="flex flex-wrap gap-2 md:gap-3">
                       <Button 
                         onClick={() => fileInputRef.current?.click()} 
                         variant="outline"
-                        className="rounded-full border-[#e5e4e2] hover:bg-white px-6"
+                        className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                       >
                         <Upload className="w-4 h-4 mr-2" />
                         Import Guide
@@ -834,7 +836,7 @@ export default function App() {
                       <Button 
                         onClick={handleMerge} 
                         disabled={selectedGuides.size < 2 || isGenerating}
-                        className="rounded-full bg-slate-900 text-white px-6"
+                        className="rounded-full bg-slate-900 text-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                       >
                         {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Merge className="w-4 h-4 mr-2" />}
                         Merge Selected ({selectedGuides.size})
@@ -843,22 +845,22 @@ export default function App() {
                   </div>
 
                   {guides.length === 0 ? (
-                    <div className="bg-white border border-[#e5e4e2] rounded-3xl p-24 flex flex-col items-center justify-center text-center shadow-sm">
-                      <div className="w-20 h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-6">
-                        <BookOpen className="w-8 h-8 text-slate-400" />
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+                        <BookOpen className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
                       </div>
-                      <h3 className="text-2xl font-serif font-medium text-slate-900">Library Empty</h3>
-                      <p className="text-slate-500 mt-2">
+                      <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Library Empty</h3>
+                      <p className="text-slate-500 mt-2 text-sm md:text-base">
                         Saved guides will appear here for future reference or merging.
                       </p>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
                       {guides.map((guide) => (
                         <div 
                           key={guide.id} 
                           className={cn(
-                            "bg-white border rounded-2xl p-6 transition-all shadow-sm hover:shadow-md cursor-pointer",
+                            "bg-white border rounded-xl md:rounded-2xl p-4 md:p-6 transition-all shadow-sm hover:shadow-md cursor-pointer",
                             selectedGuides.has(guide.id) ? "border-[#8B3A3A] ring-1 ring-[#8B3A3A]" : "border-[#e5e4e2]"
                           )}
                           onClick={() => toggleGuideSelection(guide.id)}
@@ -919,19 +921,19 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
-                  className="space-y-8"
+                  className="space-y-6 md:space-y-8"
                 >
                   <div className="border-b border-[#e5e4e2] pb-6">
-                    <h2 className="text-5xl font-serif font-light tracking-tight text-slate-900">Card Forge</h2>
-                    <p className="text-slate-500 text-lg font-light mt-2">
+                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Card Forge</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
                       Generate a new character card using a saved style guide.
                     </p>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
                     {/* Input Form */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-3xl p-8 shadow-sm space-y-6">
-                      <h3 className="font-serif font-medium text-2xl text-slate-900 mb-2">Character Details</h3>
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6">
+                      <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-2">Character Details</h3>
                       
                       <div className="space-y-2">
                         <Label htmlFor="guideSelect" className="text-slate-700 font-medium flex items-center">
@@ -1050,14 +1052,14 @@ export default function App() {
                     </div>
 
                     {/* Output Preview */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-3xl p-8 shadow-sm flex flex-col h-full">
-                      <div className="flex items-center justify-between mb-6">
-                        <h3 className="font-serif font-medium text-2xl text-slate-900">Forged Output</h3>
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm flex flex-col h-full">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
+                        <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900">Forged Output</h3>
                         {forgedCard && (
                           <Button 
                             onClick={downloadForgedCard}
                             variant="outline"
-                            className="rounded-full border-[#e5e4e2] hover:bg-[#f9f8f6] text-[#8B3A3A]"
+                            className="rounded-full border-[#e5e4e2] hover:bg-[#f9f8f6] text-[#8B3A3A] w-full sm:w-auto"
                           >
                             <Download className="w-4 h-4 mr-2" />
                             Download JSON
@@ -1066,10 +1068,10 @@ export default function App() {
                       </div>
 
                       {isForging ? (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
-                          <Loader2 className="w-12 h-12 text-[#8B3A3A] animate-spin mb-6" />
-                          <h4 className="text-xl font-serif font-medium text-slate-900">Forging Character...</h4>
-                          <p className="text-slate-500 mt-2 max-w-xs">
+                        <div className="flex-1 flex flex-col items-center justify-center text-center py-8 md:py-12">
+                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                          <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Forging Character...</h4>
+                          <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
                             Applying style guide rules to generate description, personality, and first message.
                           </p>
                         </div>
@@ -1145,18 +1147,18 @@ export default function App() {
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: -10 }}
                   transition={{ duration: 0.3 }}
-                  className="space-y-8 max-w-3xl"
+                  className="space-y-6 md:space-y-8 max-w-3xl"
                 >
                   <div className="border-b border-[#e5e4e2] pb-6">
-                    <h2 className="text-5xl font-serif font-light tracking-tight text-slate-900">Configuration</h2>
-                    <p className="text-slate-500 text-lg font-light mt-2">
+                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Configuration</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
                       Manage AI providers and API keys. Data is stored locally in your browser.
                     </p>
                   </div>
 
-                  <div className="bg-white border border-[#e5e4e2] rounded-3xl p-8 shadow-sm space-y-8">
+                  <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-6 md:space-y-8">
                     <div>
-                      <h3 className="font-serif font-medium text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
+                      <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         {(["gemini", "anthropic", "openrouter", "openai", "custom"] as AIProvider[]).map((p) => (
                           <div
@@ -1175,9 +1177,9 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="pt-8 border-t border-[#e5e4e2]">
-                      <h3 className="font-serif font-medium text-2xl text-slate-900 mb-6">API Credentials</h3>
-                      <div className="space-y-6">
+                    <div className="pt-6 md:pt-8 border-t border-[#e5e4e2]">
+                      <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4 md:mb-6">API Credentials</h3>
+                      <div className="space-y-4 md:space-y-6">
                         <div className="space-y-2">
                           <Label htmlFor="gemini" className="text-slate-700 font-medium">Gemini API Key</Label>
                           <Input
