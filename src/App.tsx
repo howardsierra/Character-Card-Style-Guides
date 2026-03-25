@@ -7,9 +7,10 @@ import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Checkbox } from "./components/ui/checkbox";
 import { cn } from "./lib/utils";
-import { CharacterCard, parseFile, parsePdfToText } from "./lib/parser";
-import { AIProvider, ApiKeys, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype } from "./lib/api";
+import { CharacterCard, parseFile, parsePdfToText, parseDocxToText } from "./lib/parser";
+import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype } from "./lib/api";
 import { DEFAULT_GUIDE_CONTENT } from "./lib/defaultGuide";
+import { CardTemplate, DEFAULT_TEMPLATES } from "./lib/templates";
 import ReactMarkdown from "react-markdown";
 import { motion, AnimatePresence } from "motion/react";
 // @ts-ignore
@@ -76,6 +77,10 @@ export default function App() {
     customKey: "",
   });
 
+  const [apiModels, setApiModels] = useState<Record<string, string>>({});
+  const [availableModels, setAvailableModels] = useState<Record<string, AIModel[]>>({});
+  const [isFetchingModels, setIsFetchingModels] = useState<Record<string, boolean>>({});
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [currentGuide, setCurrentGuide] = useState<string | null>(null);
   const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
@@ -90,6 +95,7 @@ export default function App() {
   const [forgeConcept, setForgeConcept] = useState("");
   const [forgeSlots, setForgeSlots] = useState<{ name: string, description: string, value: string }[]>([]);
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
+  const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>(DEFAULT_TEMPLATES[0].id);
   const [isForging, setIsForging] = useState(false);
   const [isExtractingSlots, setIsExtractingSlots] = useState(false);
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
@@ -103,8 +109,25 @@ export default function App() {
     const savedKeys = localStorage.getItem("st_style_keys");
     if (savedKeys) setApiKeys(JSON.parse(savedKeys));
 
+    const savedModels = localStorage.getItem("st_style_models");
+    if (savedModels) setApiModels(JSON.parse(savedModels));
+
     const savedProvider = localStorage.getItem("st_style_provider");
     if (savedProvider) setProvider(savedProvider as AIProvider);
+
+    const savedDraft = localStorage.getItem("st_forge_draft");
+    if (savedDraft) {
+      try {
+        const draft = JSON.parse(savedDraft);
+        if (draft.forgeName) setForgeName(draft.forgeName);
+        if (draft.forgeConcept) setForgeConcept(draft.forgeConcept);
+        if (draft.forgeSlots) setForgeSlots(draft.forgeSlots);
+        if (draft.forgeSelectedGuide) setForgeSelectedGuide(draft.forgeSelectedGuide);
+        if (draft.forgeSelectedTemplate) setForgeSelectedTemplate(draft.forgeSelectedTemplate);
+      } catch (e) {
+        console.error("Failed to load draft", e);
+      }
+    }
 
     const savedGuides = localStorage.getItem("st_style_guides");
     if (savedGuides) {
@@ -126,12 +149,83 @@ export default function App() {
   }, [apiKeys]);
 
   useEffect(() => {
+    localStorage.setItem("st_style_models", JSON.stringify(apiModels));
+  }, [apiModels]);
+
+  useEffect(() => {
     localStorage.setItem("st_style_provider", provider);
   }, [provider]);
 
   useEffect(() => {
     localStorage.setItem("st_style_guides", JSON.stringify(guides));
   }, [guides]);
+
+  // Save drafts
+  useEffect(() => {
+    const draft = {
+      forgeName,
+      forgeConcept,
+      forgeSlots,
+      forgeSelectedGuide,
+      forgeSelectedTemplate
+    };
+    localStorage.setItem("st_forge_draft", JSON.stringify(draft));
+  }, [forgeName, forgeConcept, forgeSlots, forgeSelectedGuide, forgeSelectedTemplate]);
+
+  const prevKeysRef = useRef<ApiKeys>(apiKeys);
+  const prevProviderRef = useRef<AIProvider>(provider);
+
+  // Fetch models when key or provider changes
+  useEffect(() => {
+    const fetchProviderModels = async (p: AIProvider) => {
+      const key = p === "custom" ? apiKeys.customKey : apiKeys[p as keyof ApiKeys];
+      if (!key && p !== "gemini" && p !== "openai" && p !== "anthropic" && p !== "openrouter") return;
+      
+      setIsFetchingModels(prev => ({ ...prev, [p]: true }));
+      try {
+        const models = await fetchModels(p, apiKeys);
+        setAvailableModels(prev => ({ ...prev, [p]: models }));
+        
+        setApiModels(prev => {
+          if (models.length > 0 && !models.find(m => m.id === prev[p])) {
+            return { ...prev, [p]: models[0].id };
+          }
+          return prev;
+        });
+      } catch (error) {
+        console.error(`Failed to fetch models for ${p}`, error);
+      } finally {
+        setIsFetchingModels(prev => ({ ...prev, [p]: false }));
+      }
+    };
+
+    const prevKeys = prevKeysRef.current;
+    const prevProvider = prevProviderRef.current;
+
+    // On mount or provider change, fetch for the current provider
+    if (provider !== prevProvider) {
+      fetchProviderModels(provider);
+    }
+
+    // Fetch for any provider whose key changed
+    if (apiKeys.gemini !== prevKeys.gemini) fetchProviderModels("gemini");
+    if (apiKeys.anthropic !== prevKeys.anthropic) fetchProviderModels("anthropic");
+    if (apiKeys.openai !== prevKeys.openai) fetchProviderModels("openai");
+    if (apiKeys.openrouter !== prevKeys.openrouter) fetchProviderModels("openrouter");
+    if (apiKeys.customEndpoint !== prevKeys.customEndpoint || apiKeys.customKey !== prevKeys.customKey) {
+      fetchProviderModels("custom");
+    }
+
+    // Initial fetch for all providers on mount
+    if (prevKeys === apiKeys && prevProvider === provider) {
+      (["gemini", "anthropic", "openai", "openrouter", "custom"] as AIProvider[]).forEach(p => {
+        fetchProviderModels(p);
+      });
+    }
+
+    prevKeysRef.current = apiKeys;
+    prevProviderRef.current = provider;
+  }, [provider, apiKeys]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
@@ -161,6 +255,21 @@ export default function App() {
             newGuides.push({
               id: Date.now().toString() + i,
               title: file.name.replace(/\.pdf$/i, ''),
+              content: text,
+              date: new Date().toISOString(),
+              versions: []
+            });
+            continue;
+          }
+        }
+
+        // Check if it's a DOCX Style Guide
+        if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.name.endsWith(".docx")) {
+          const text = await parseDocxToText(file);
+          if (text) {
+            newGuides.push({
+              id: Date.now().toString() + i,
+              title: file.name.replace(/\.docx$/i, ''),
               content: text,
               date: new Date().toISOString(),
               versions: []
@@ -205,7 +314,7 @@ export default function App() {
     if (cards.length === 0) return;
     setIsGenerating(true);
     try {
-      const result = await generateStyleGuide(provider, apiKeys, cards);
+      const result = await generateStyleGuide(provider, apiKeys, cards, apiModels[provider]);
       setCurrentGuide(result);
       setCurrentGuideId(null);
       setIsEditingGuide(false);
@@ -226,7 +335,7 @@ export default function App() {
       const guidesToMerge = guides
         .filter((g) => selectedGuides.has(g.id))
         .map((g) => g.content);
-      const result = await mergeStyleGuides(provider, apiKeys, guidesToMerge);
+      const result = await mergeStyleGuides(provider, apiKeys, guidesToMerge, apiModels[provider]);
       setCurrentGuide(result);
       setCurrentGuideId(null);
       setIsEditingGuide(false);
@@ -358,7 +467,7 @@ export default function App() {
     const guide = guides.find(g => g.id === forgeSelectedGuide);
     if (guide) {
       setIsExtractingSlots(true);
-      extractSlotsFromGuide(provider, apiKeys, guide.content).then(slots => {
+      extractSlotsFromGuide(provider, apiKeys, guide.content, apiModels[provider]).then(slots => {
         setForgeSlots(prev => {
           return slots.map(s => {
             const existing = prev.find(p => p.name === s.name);
@@ -384,11 +493,14 @@ export default function App() {
         ...forgeSlots
       ];
 
+      const template = DEFAULT_TEMPLATES.find(t => t.id === forgeSelectedTemplate)?.content;
       const result = await generateCharacterCard(
         provider,
         apiKeys,
         guide.content,
-        allSlots
+        allSlots,
+        template,
+        apiModels[provider]
       );
       setForgedCard(result);
     } catch (err) {
@@ -403,7 +515,7 @@ export default function App() {
     setIsSuggestingArchetype(true);
     try {
       const traits = forgeSlots.map(s => `${s.name}: ${s.value}`).join("\n");
-      const suggestion = await suggestArchetype(provider, apiKeys, traits);
+      const suggestion = await suggestArchetype(provider, apiKeys, traits, apiModels[provider]);
       setForgeConcept(suggestion);
     } catch (err) {
       console.error(err);
@@ -490,12 +602,12 @@ export default function App() {
                     </div>
                     <h3 className="text-2xl font-serif font-medium text-slate-900">Select Character Cards</h3>
                     <p className="text-slate-500 mt-2 mb-8 max-w-md">
-                      Drag and drop PNG, JSON, or PDF files here, or click to browse your computer.
+                      Drag and drop PNG, JSON, PDF, or DOCX files here, or click to browse your computer.
                     </p>
                     <input
                       type="file"
                       multiple
-                      accept=".png,.json,.pdf"
+                      accept=".png,.json,.pdf,.docx"
                       className="hidden"
                       ref={fileInputRef}
                       onChange={handleFileUpload}
@@ -843,6 +955,23 @@ export default function App() {
                       </div>
 
                       <div className="space-y-2">
+                        <Label htmlFor="templateSelect" className="text-slate-700 font-medium flex items-center">
+                          Card Template <span className="text-red-500 ml-1">*</span>
+                          <InfoTooltip text="The structural template used to format the character card's fields." />
+                        </Label>
+                        <select
+                          id="templateSelect"
+                          value={forgeSelectedTemplate}
+                          onChange={(e) => setForgeSelectedTemplate(e.target.value)}
+                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                        >
+                          {DEFAULT_TEMPLATES.map((t) => (
+                            <option key={t.id} value={t.id}>{t.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="space-y-2">
                         <Label htmlFor="charName" className="text-slate-700 font-medium flex items-center">
                           Character Name <span className="text-red-500 ml-1">*</span>
                           <InfoTooltip text="The full name or nickname of the character. Example: 'Silas Thorne' or 'Captain Elara'." />
@@ -1060,6 +1189,21 @@ export default function App() {
                             className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           <p className="text-xs text-slate-500">Leave blank to use the default AI Studio key.</p>
+                          {availableModels["gemini"]?.length > 0 && (
+                            <div className="mt-2">
+                              <Label htmlFor="gemini-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <select
+                                id="gemini-model"
+                                value={apiModels["gemini"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, gemini: e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                              >
+                                {availableModels["gemini"].map(m => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
                         
                         <div className="space-y-2">
@@ -1072,6 +1216,21 @@ export default function App() {
                             onChange={(e) => setApiKeys({ ...apiKeys, anthropic: e.target.value })}
                             className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
+                          {availableModels["anthropic"]?.length > 0 && (
+                            <div className="mt-2">
+                              <Label htmlFor="anthropic-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <select
+                                id="anthropic-model"
+                                value={apiModels["anthropic"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, anthropic: e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                              >
+                                {availableModels["anthropic"].map(m => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
 
                         <div className="space-y-2">
@@ -1084,6 +1243,21 @@ export default function App() {
                             onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })}
                             className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
+                          {availableModels["openai"]?.length > 0 && (
+                            <div className="mt-2">
+                              <Label htmlFor="openai-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <select
+                                id="openai-model"
+                                value={apiModels["openai"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, openai: e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                              >
+                                {availableModels["openai"].map(m => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
 
                         <div className="space-y-2">
@@ -1096,6 +1270,21 @@ export default function App() {
                             onChange={(e) => setApiKeys({ ...apiKeys, openrouter: e.target.value })}
                             className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
+                          {availableModels["openrouter"]?.length > 0 && (
+                            <div className="mt-2">
+                              <Label htmlFor="openrouter-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <select
+                                id="openrouter-model"
+                                value={apiModels["openrouter"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, openrouter: e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                              >
+                                {availableModels["openrouter"].map(m => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
 
                         <div className="pt-6 mt-6 border-t border-[#e5e4e2] space-y-6">
@@ -1120,6 +1309,21 @@ export default function App() {
                               className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                             />
                           </div>
+                          {availableModels["custom"]?.length > 0 && (
+                            <div className="mt-2">
+                              <Label htmlFor="custom-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <select
+                                id="custom-model"
+                                value={apiModels["custom"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, custom: e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                              >
+                                {availableModels["custom"].map(m => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

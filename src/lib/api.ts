@@ -12,6 +12,140 @@ export interface ApiKeys {
   customKey: string;
 }
 
+export interface AIModel {
+  id: string;
+  name: string;
+}
+
+export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<AIModel[]> {
+  try {
+    switch (provider) {
+      case "gemini": {
+        const key = keys.gemini || process.env.GEMINI_API_KEY;
+        const defaultModels = [
+          { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview" },
+          { id: "gemini-3.1-flash-preview", name: "Gemini 3.1 Flash Preview" },
+          { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview" },
+          { id: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite Preview" },
+          { id: "gemini-2.5-pro-preview", name: "Gemini 2.5 Pro Preview" },
+          { id: "gemini-2.5-flash-preview", name: "Gemini 2.5 Flash Preview" }
+        ];
+        if (!key) return defaultModels;
+        try {
+          const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+          if (!res.ok) throw new Error("Failed to fetch Gemini models");
+          const data = await res.json();
+          return data.models
+            .filter((m: any) => m.supportedGenerationMethods.includes("generateContent"))
+            .map((m: any) => ({
+              id: m.name.replace("models/", ""),
+              name: m.displayName || m.name.replace("models/", "")
+            }));
+        } catch (e) {
+          console.warn("Could not fetch Gemini models, using defaults", e);
+          return defaultModels;
+        }
+      }
+      case "openai": {
+        const defaultModels = [
+          { id: "gpt-4o", name: "GPT-4o" },
+          { id: "gpt-4o-mini", name: "GPT-4o Mini" },
+          { id: "o1", name: "o1" },
+          { id: "o1-preview", name: "o1 Preview" },
+          { id: "o1-mini", name: "o1 Mini" },
+          { id: "o3-mini", name: "o3 Mini" }
+        ];
+        if (!keys.openai) return defaultModels;
+        try {
+          const res = await fetch("https://api.openai.com/v1/models", {
+            headers: { "Authorization": `Bearer ${keys.openai}` }
+          });
+          if (!res.ok) throw new Error("Failed to fetch OpenAI models");
+          const data = await res.json();
+          return data.data
+            .map((m: any) => ({ id: m.id, name: m.id }))
+            .sort((a: any, b: any) => a.id.localeCompare(b.id));
+        } catch (e) {
+          console.warn("Could not fetch OpenAI models, using defaults", e);
+          return defaultModels;
+        }
+      }
+      case "openrouter": {
+        try {
+          const res = await fetch("https://openrouter.ai/api/v1/models");
+          if (!res.ok) throw new Error("Failed to fetch OpenRouter models");
+          const data = await res.json();
+          return data.data
+            .map((m: any) => ({ id: m.id, name: m.name }))
+            .sort((a: any, b: any) => a.name.localeCompare(b.name));
+        } catch (e) {
+          console.warn("Could not fetch OpenRouter models", e);
+          return [];
+        }
+      }
+      case "anthropic": {
+        const defaultModels = [
+          { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet" },
+          { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
+          { id: "claude-3-5-haiku-20241022", name: "Claude 3.5 Haiku" },
+          { id: "claude-3-opus-20240229", name: "Claude 3 Opus" }
+        ];
+        if (!keys.anthropic) return defaultModels;
+        try {
+          const res = await fetch("https://api.anthropic.com/v1/models", {
+            headers: {
+              "x-api-key": keys.anthropic,
+              "anthropic-version": "2023-06-01",
+              "anthropic-dangerous-direct-browser-access": "true"
+            }
+          });
+          if (!res.ok) throw new Error("Failed to fetch Anthropic models");
+          const data = await res.json();
+          return data.data
+            .map((m: any) => ({ id: m.id, name: m.display_name || m.id }))
+            .sort((a: any, b: any) => a.name.localeCompare(b.name));
+        } catch (e) {
+          console.warn("Could not fetch Anthropic models, using defaults", e);
+          return defaultModels;
+        }
+      }
+      case "custom": {
+        if (!keys.customEndpoint || !keys.customKey) return [];
+        const baseUrl = keys.customEndpoint.replace(/\/chat\/completions\/?$/, "");
+        const res = await fetch(`${baseUrl}/models`, {
+          headers: { "Authorization": `Bearer ${keys.customKey}` }
+        });
+        if (!res.ok) throw new Error("Failed to fetch Custom models");
+        const data = await res.json();
+        return data.data.map((m: any) => ({ id: m.id, name: m.id }));
+      }
+      default:
+        return [];
+    }
+  } catch (error) {
+    console.error(`Error fetching models for ${provider}:`, error);
+    if (provider === "anthropic") {
+      return [
+        { id: "claude-3-7-sonnet-20250219", name: "Claude 3.7 Sonnet" },
+        { id: "claude-3-5-sonnet-20241022", name: "Claude 3.5 Sonnet" },
+        { id: "claude-3-opus-20240229", name: "Claude 3 Opus" },
+        { id: "claude-3-haiku-20240307", name: "Claude 3 Haiku" }
+      ];
+    }
+    if (provider === "gemini") {
+      return [
+        { id: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview" },
+        { id: "gemini-3.1-flash-preview", name: "Gemini 3.1 Flash Preview" },
+        { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview" },
+        { id: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite Preview" },
+        { id: "gemini-2.5-pro-preview", name: "Gemini 2.5 Pro Preview" },
+        { id: "gemini-2.5-flash-preview", name: "Gemini 2.5 Flash Preview" }
+      ];
+    }
+    return [];
+  }
+}
+
 const SYSTEM_PROMPT = `You are an expert literary analyst and character designer. Your task is to analyze a collection of character cards (from the same creator) and generate a comprehensive writing style guide that captures their unique authorial voice, formatting, and structural DNA.
 
 The output MUST be formatted as a Markdown document that closely matches the structure and sections of the "Elysiansyna Style Guide" example.
@@ -40,32 +174,29 @@ Analyze the provided character data deeply. Look for recurring patterns in:
 
 Output ONLY the Markdown document. Make it look professional and attractive.`;
 
-export async function generateStyleGuide(
+async function callAIProvider(
   provider: AIProvider,
   keys: ApiKeys,
-  cards: CharacterCard[]
+  prompt: string,
+  systemPrompt: string,
+  jsonMode: boolean = false,
+  maxTokens: number = 4000,
+  model?: string
 ): Promise<string> {
-  const cardsData = cards.map((c, i) => `
---- Character ${i + 1}: ${c.name} ---
-Description: ${c.description}
-Personality: ${c.personality}
-Scenario: ${c.scenario}
-First Message: ${c.first_mes}
-Example Messages: ${c.mes_example}
-`).join("\n");
-
-  const prompt = `Here are the character cards to analyze:\n\n${cardsData}\n\nPlease generate the comprehensive style guide based on these cards.`;
-
   try {
     switch (provider) {
       case "gemini": {
         const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
+        const config: any = {
+          systemInstruction: systemPrompt,
+        };
+        if (jsonMode) {
+          config.responseMimeType = "application/json";
+        }
         const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
+          model: model || "gemini-3.1-pro-preview",
           contents: prompt,
-          config: {
-            systemInstruction: SYSTEM_PROMPT,
-          },
+          config,
         });
         return response.text || "";
       }
@@ -79,36 +210,58 @@ Example Messages: ${c.mes_example}
             "anthropic-dangerous-direct-browser-access": "true"
           },
           body: JSON.stringify({
-            model: "claude-3-opus-20240229",
-            max_tokens: 4000,
-            system: SYSTEM_PROMPT,
+            model: model || "claude-3-opus-20240229",
+            max_tokens: maxTokens,
+            system: systemPrompt,
             messages: [{ role: "user", content: prompt }],
           }),
         });
-        if (!res.ok) throw new Error(`Anthropic API error: ${res.statusText}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error?.message || errData.message || res.statusText;
+          throw new Error(`Anthropic API error: ${errMsg}`);
+        }
         const data = await res.json();
         return data.content[0].text;
       }
       case "openai": {
+        const body: any = {
+          model: model || "gpt-4-turbo-preview",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt }
+          ],
+        };
+        if (jsonMode) {
+          body.response_format = { type: "json_object" };
+        }
         const res = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${keys.openai}`,
           },
-          body: JSON.stringify({
-            model: "gpt-4-turbo-preview",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: prompt }
-            ],
-          }),
+          body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error?.message || errData.message || res.statusText;
+          throw new Error(`OpenAI API error: ${errMsg}`);
+        }
         const data = await res.json();
         return data.choices[0].message.content;
       }
       case "openrouter": {
+        const body: any = {
+          model: model || "anthropic/claude-3-opus",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt }
+          ],
+        };
+        if (jsonMode) {
+          body.response_format = { type: "json_object" };
+        }
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -117,34 +270,37 @@ Example Messages: ${c.mes_example}
             "HTTP-Referer": window.location.href,
             "X-Title": "SillyTavern Style Guide Generator",
           },
-          body: JSON.stringify({
-            model: "anthropic/claude-3-opus",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: prompt }
-            ],
-          }),
+          body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`OpenRouter API error: ${res.statusText}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error?.message || errData.message || res.statusText;
+          throw new Error(`OpenRouter API error: ${errMsg}`);
+        }
         const data = await res.json();
         return data.choices[0].message.content;
       }
       case "custom": {
+        const body: any = {
+          model: model || "default",
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt }
+          ],
+        };
         const res = await fetch(keys.customEndpoint, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             "Authorization": `Bearer ${keys.customKey}`,
           },
-          body: JSON.stringify({
-            model: "default",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: prompt }
-            ],
-          }),
+          body: JSON.stringify(body),
         });
-        if (!res.ok) throw new Error(`Custom API error: ${res.statusText}`);
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error?.message || errData.message || res.statusText;
+          throw new Error(`Custom API error: ${errMsg}`);
+        }
         const data = await res.json();
         return data.choices[0].message.content;
       }
@@ -152,21 +308,44 @@ Example Messages: ${c.mes_example}
         throw new Error("Unknown provider");
     }
   } catch (error) {
-    console.error("Error generating style guide:", error);
+    console.error(`Error calling ${provider} API:`, error);
     throw error;
   }
+}
+
+export async function generateStyleGuide(
+  provider: AIProvider,
+  keys: ApiKeys,
+  cards: CharacterCard[],
+  model?: string
+): Promise<string> {
+  const cardsData = cards.map((c, i) => `
+--- Character ${i + 1}: ${c.name} ---
+Description: ${c.description}
+Personality: ${c.personality}
+Scenario: ${c.scenario}
+First Message: ${c.first_mes}
+Example Messages: ${c.mes_example}
+`).join("\n");
+
+  const prompt = `Here are the character cards to analyze:\n\n${cardsData}\n\nPlease generate the comprehensive style guide based on these cards.`;
+
+  return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 4000, model);
 }
 
 export async function generateCharacterCard(
   provider: AIProvider,
   keys: ApiKeys,
   styleGuide: string,
-  slots: { name: string; value: string }[]
+  slots: { name: string; value: string }[],
+  template?: string,
+  model?: string
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
+  const templateStr = template ? `\nTEMPLATE INSTRUCTIONS:\n${template}\n` : "";
   const prompt = `You are an expert character creator for roleplay.
 Using the following Style Guide, create a character card that STRICTLY adheres to its formatting, tone, and structural rules.
-
+${templateStr}
 STYLE GUIDE:
 ${styleGuide}
 
@@ -195,114 +374,23 @@ You MUST output ONLY valid JSON matching this structure. Do not include any othe
     }
   };
 
-  try {
-    switch (provider) {
-      case "gemini": {
-        const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
-          contents: prompt,
-          config: {
-            systemInstruction: "You are an expert character creator. Output only valid JSON.",
-            responseMimeType: "application/json",
-          },
-        });
-        return parseResponse(response.text || "{}");
-      }
-      case "anthropic": {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": keys.anthropic,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true"
-          },
-          body: JSON.stringify({
-            model: "claude-3-opus-20240229",
-            max_tokens: 4000,
-            system: "You are an expert character creator. Output only valid JSON.",
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        if (!res.ok) throw new Error(`Anthropic API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.content[0].text);
-      }
-      case "openai": {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openai}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4-turbo-preview",
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: "You are an expert character creator. Output only valid JSON." },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.choices[0].message.content);
-      }
-      case "openrouter": {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openrouter}`,
-            "HTTP-Referer": window.location.href,
-            "X-Title": "SillyTavern Style Guide Generator",
-          },
-          body: JSON.stringify({
-            model: "anthropic/claude-3-opus",
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: "You are an expert character creator. Output only valid JSON." },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenRouter API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.choices[0].message.content);
-      }
-      case "custom": {
-        const res = await fetch(keys.customEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.customKey}`,
-          },
-          body: JSON.stringify({
-            model: "default",
-            messages: [
-              { role: "system", content: "You are an expert character creator. Output only valid JSON." },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`Custom API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.choices[0].message.content);
-      }
-      default:
-        throw new Error("Unknown provider");
-    }
-  } catch (error) {
-    console.error("Error generating character card:", error);
-    throw error;
-  }
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character creator. Output only valid JSON.",
+    true,
+    4000,
+    model
+  );
+  return parseResponse(responseText);
 }
 
 export async function extractSlotsFromGuide(
   provider: AIProvider,
   keys: ApiKeys,
-  styleGuide: string
+  styleGuide: string,
+  model?: string
 ): Promise<{ name: string; description: string }[]> {
   const prompt = `Analyze the following Style Guide and extract the required and optional sections/slots that a user should fill out to create a character card using this guide.
 Return ONLY a JSON array of objects, where each object has a "name" (the name of the slot/field) and a "description" (a brief explanation of what should go in this field based on the guide).
@@ -327,103 +415,16 @@ ${styleGuide}`;
   };
 
   try {
-    switch (provider) {
-      case "gemini": {
-        const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
-          contents: prompt,
-          config: {
-            systemInstruction: "You are an expert character creator. Output only valid JSON.",
-            responseMimeType: "application/json",
-          },
-        });
-        return parseResponse(response.text || "[]");
-      }
-      case "anthropic": {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": keys.anthropic,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true"
-          },
-          body: JSON.stringify({
-            model: "claude-3-opus-20240229",
-            max_tokens: 4000,
-            system: "You are an expert character creator. Output only valid JSON.",
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        if (!res.ok) throw new Error(`Anthropic API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.content[0].text);
-      }
-      case "openai": {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openai}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4-turbo-preview",
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: "You are an expert character creator. Output only valid JSON." },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.choices[0].message.content);
-      }
-      case "openrouter": {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openrouter}`,
-            "HTTP-Referer": window.location.href,
-            "X-Title": "SillyTavern Style Guide Generator",
-          },
-          body: JSON.stringify({
-            model: "anthropic/claude-3-opus",
-            response_format: { type: "json_object" },
-            messages: [
-              { role: "system", content: "You are an expert character creator. Output only valid JSON." },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenRouter API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.choices[0].message.content);
-      }
-      case "custom": {
-        const res = await fetch(keys.customEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.customKey}`,
-          },
-          body: JSON.stringify({
-            model: "default",
-            messages: [
-              { role: "system", content: "You are an expert character creator. Output only valid JSON." },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`Custom API error: ${res.statusText}`);
-        const data = await res.json();
-        return parseResponse(data.choices[0].message.content);
-      }
-      default:
-        throw new Error("Unknown provider");
-    }
+    const responseText = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      true,
+      4000,
+      model
+    );
+    return parseResponse(responseText);
   } catch (error) {
     console.error("Error extracting slots:", error);
     return [
@@ -438,7 +439,8 @@ ${styleGuide}`;
 export async function suggestArchetype(
   provider: AIProvider,
   keys: ApiKeys,
-  traits: string
+  traits: string,
+  model?: string
 ): Promise<string> {
   const prompt = `Based on the following character traits and details, suggest a short, punchy archetype name (e.g., "The Cold CEO", "The Grumpy Bodyguard", "The Golden Retriever Boyfriend"). Return ONLY the archetype name as a plain string, with no quotes or extra text.
 
@@ -446,87 +448,16 @@ CHARACTER TRAITS:
 ${traits}`;
 
   try {
-    switch (provider) {
-      case "gemini": {
-        const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
-          contents: prompt,
-        });
-        return response.text?.trim() || "The Mysterious Stranger";
-      }
-      case "anthropic": {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": keys.anthropic,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true"
-          },
-          body: JSON.stringify({
-            model: "claude-3-opus-20240229",
-            max_tokens: 100,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        if (!res.ok) throw new Error(`Anthropic API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.content[0].text.trim();
-      }
-      case "openai": {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openai}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4-turbo-preview",
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.choices[0].message.content.trim();
-      }
-      case "openrouter": {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openrouter}`,
-            "HTTP-Referer": window.location.href,
-            "X-Title": "SillyTavern Style Guide Generator",
-          },
-          body: JSON.stringify({
-            model: "anthropic/claude-3-opus",
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenRouter API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.choices[0].message.content.trim();
-      }
-      case "custom": {
-        const res = await fetch(keys.customEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.customKey}`,
-          },
-          body: JSON.stringify({
-            model: "default",
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        if (!res.ok) throw new Error(`Custom API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.choices[0].message.content.trim();
-      }
-      default:
-        return "The Mysterious Stranger";
-    }
+    const responseText = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator.",
+      false,
+      100,
+      model
+    );
+    return responseText.trim() || "The Mysterious Stranger";
   } catch (error) {
     console.error("Error suggesting archetype:", error);
     return "The Mysterious Stranger";
@@ -536,108 +467,11 @@ ${traits}`;
 export async function mergeStyleGuides(
   provider: AIProvider,
   keys: ApiKeys,
-  guides: string[]
+  guides: string[],
+  model?: string
 ): Promise<string> {
   const guidesData = guides.map((g, i) => `--- Guide ${i + 1} ---\n${g}`).join("\n\n");
   const prompt = `Here are multiple style guides:\n\n${guidesData}\n\nPlease merge them into a single, cohesive, comprehensive style guide that combines the insights, patterns, and formatting rules from all of them. Maintain the same 14-section structure as requested before. Ensure the final output is well-organized and eliminates redundancies while preserving unique details from each guide.`;
 
-  try {
-    switch (provider) {
-      case "gemini": {
-        const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
-          contents: prompt,
-          config: {
-            systemInstruction: SYSTEM_PROMPT,
-          },
-        });
-        return response.text || "";
-      }
-      case "anthropic": {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": keys.anthropic,
-            "anthropic-version": "2023-06-01",
-            "anthropic-dangerous-direct-browser-access": "true"
-          },
-          body: JSON.stringify({
-            model: "claude-3-opus-20240229",
-            max_tokens: 4000,
-            system: SYSTEM_PROMPT,
-            messages: [{ role: "user", content: prompt }],
-          }),
-        });
-        if (!res.ok) throw new Error(`Anthropic API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.content[0].text;
-      }
-      case "openai": {
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openai}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4-turbo-preview",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenAI API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.choices[0].message.content;
-      }
-      case "openrouter": {
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openrouter}`,
-            "HTTP-Referer": window.location.href,
-            "X-Title": "SillyTavern Style Guide Generator",
-          },
-          body: JSON.stringify({
-            model: "anthropic/claude-3-opus",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`OpenRouter API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.choices[0].message.content;
-      }
-      case "custom": {
-        const res = await fetch(keys.customEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.customKey}`,
-          },
-          body: JSON.stringify({
-            model: "default",
-            messages: [
-              { role: "system", content: SYSTEM_PROMPT },
-              { role: "user", content: prompt }
-            ],
-          }),
-        });
-        if (!res.ok) throw new Error(`Custom API error: ${res.statusText}`);
-        const data = await res.json();
-        return data.choices[0].message.content;
-      }
-      default:
-        throw new Error("Unknown provider");
-    }
-  } catch (error) {
-    console.error("Error merging style guides:", error);
-    throw error;
-  }
+  return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 4000, model);
 }

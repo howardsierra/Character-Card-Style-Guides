@@ -1,4 +1,5 @@
 import * as pdfjsLib from 'pdfjs-dist';
+import mammoth from 'mammoth';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.mjs`;
 
@@ -16,6 +17,12 @@ export interface CharacterCard {
   creator?: string;
   character_version?: string;
   alternate_greetings?: string[];
+}
+
+export async function parseDocxToText(file: File): Promise<string> {
+  const arrayBuffer = await file.arrayBuffer();
+  const result = await mammoth.extractRawText({ arrayBuffer });
+  return result.value.trim();
 }
 
 export async function parsePdfToText(file: File): Promise<string> {
