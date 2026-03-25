@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2 } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -16,6 +16,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { toPng } from "html-to-image";
 import html2pdf from "html2pdf.js";
 import UniverseMap from "./components/UniverseMap";
+import { useHistory } from "./hooks/useHistory";
 
 type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "settings";
 
@@ -97,11 +98,27 @@ export default function App() {
   const [universeSelectedGuide, setUniverseSelectedGuide] = useState<string>("");
 
   // Card Forge State
-  const [forgeName, setForgeName] = useState("");
-  const [forgeConcept, setForgeConcept] = useState("");
-  const [forgeSlots, setForgeSlots] = useState<{ name: string, description: string, value: string }[]>([]);
+  const [forgeState, setForgeState, forgeHistory] = useHistory({
+    name: "",
+    concept: "",
+    slots: [] as { name: string, description: string, value: string }[]
+  });
+  const forgeName = forgeState.name;
+  const forgeConcept = forgeState.concept;
+  const forgeSlots = forgeState.slots;
+  
+  const setForgeName = (name: string) => setForgeState(prev => ({ ...prev, name }));
+  const setForgeConcept = (concept: string) => setForgeState(prev => ({ ...prev, concept }));
+  const setForgeSlots = (slots: { name: string, description: string, value: string }[] | ((prev: { name: string, description: string, value: string }[]) => { name: string, description: string, value: string }[])) => {
+    setForgeState(prev => ({
+      ...prev,
+      slots: typeof slots === 'function' ? slots(prev.slots) : slots
+    }));
+  };
+
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
   const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>("");
+  const [customTemplates, setCustomTemplates] = useState<CardTemplate[]>([]);
   const [isForging, setIsForging] = useState(false);
   const [isExtractingSlots, setIsExtractingSlots] = useState(false);
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
@@ -146,6 +163,11 @@ export default function App() {
         date: new Date().toISOString(),
         versions: []
       }]);
+    }
+
+    const savedTemplates = localStorage.getItem("st_custom_templates");
+    if (savedTemplates) {
+      setCustomTemplates(JSON.parse(savedTemplates));
     }
   }, []);
 
@@ -332,6 +354,25 @@ export default function App() {
     reader.readAsDataURL(file);
   };
 
+  const handleTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const content = event.target?.result as string;
+      const newTemplate: CardTemplate = {
+        id: `custom-${Date.now()}`,
+        name: file.name.replace(/\.[^/.]+$/, ""),
+        content: content
+      };
+      setCustomTemplates(prev => [...prev, newTemplate]);
+      setForgeSelectedTemplate(newTemplate.id);
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  };
+
   const exportCardJson = (card: CharacterCard) => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(card, null, 2));
     const downloadAnchorNode = document.createElement("a");
@@ -515,24 +556,74 @@ export default function App() {
   };
 
   useEffect(() => {
+    localStorage.setItem("st_custom_templates", JSON.stringify(customTemplates));
+  }, [customTemplates]);
+
+  useEffect(() => {
     if (!forgeSelectedGuide) {
       setForgeSlots([]);
       return;
     }
-    const guide = guides.find(g => g.id === forgeSelectedGuide);
-    if (guide) {
-      setIsExtractingSlots(true);
-      extractSlotsFromGuide(provider, apiKeys, guide.content, apiModels[provider]).then(slots => {
-        setForgeSlots(prev => {
-          return slots.map(s => {
-            const existing = prev.find(p => p.name === s.name);
-            return { ...s, value: existing ? existing.value : "" };
+    
+    setIsExtractingSlots(true);
+
+    if (forgeSelectedTemplate) {
+      const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
+      if (template) {
+        import("./lib/api").then(({ extractSlotsFromTemplate }) => {
+          extractSlotsFromTemplate(provider, apiKeys, template.content, apiModels[provider]).then(slots => {
+            setForgeSlots(prev => {
+              return slots.map(s => {
+                const existing = prev.find(p => p.name === s.name);
+                return { ...s, value: existing ? existing.value : "" };
+              });
+            });
+            setIsExtractingSlots(false);
           });
         });
-        setIsExtractingSlots(false);
-      });
+        return;
+      }
     }
-  }, [forgeSelectedGuide, provider, apiKeys, guides]);
+
+    const guide = guides.find(g => g.id === forgeSelectedGuide);
+    if (guide) {
+      import("./lib/api").then(({ extractSlotsFromGuide }) => {
+        extractSlotsFromGuide(provider, apiKeys, guide.content, apiModels[provider]).then(slots => {
+          setForgeSlots(prev => {
+            return slots.map(s => {
+              const existing = prev.find(p => p.name === s.name);
+              return { ...s, value: existing ? existing.value : "" };
+            });
+          });
+          setIsExtractingSlots(false);
+        });
+      });
+    } else {
+      setIsExtractingSlots(false);
+    }
+  }, [forgeSelectedGuide, forgeSelectedTemplate, provider, apiKeys, guides, customTemplates]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (view !== "create") return;
+      
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          forgeHistory.redo();
+        } else {
+          e.preventDefault();
+          forgeHistory.undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        e.preventDefault();
+        forgeHistory.redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view, forgeHistory]);
 
   const handleExtractUniverse = async () => {
     if (!universeSelectedGuide) return;
@@ -565,7 +656,7 @@ export default function App() {
         ...forgeSlots
       ];
 
-      const template = DEFAULT_TEMPLATES.find(t => t.id === forgeSelectedTemplate)?.content;
+      const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate)?.content;
       const result = await generateCharacterCard(
         provider,
         apiKeys,
@@ -1049,11 +1140,36 @@ export default function App() {
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
                     {/* Input Form */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6">
-                      <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-2">Character Details</h3>
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#8B3A3A]/20 via-[#8B3A3A] to-[#8B3A3A]/20"></div>
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Character Details</h3>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={forgeHistory.undo}
+                            disabled={!forgeHistory.canUndo}
+                            className="h-8 px-2 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            title="Undo (Ctrl+Z)"
+                          >
+                            <Undo2 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={forgeHistory.redo}
+                            disabled={!forgeHistory.canRedo}
+                            className="h-8 px-2 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            title="Redo (Ctrl+Y)"
+                          >
+                            <Redo2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </div>
                       
                       <div className="space-y-2">
-                        <Label htmlFor="guideSelect" className="text-slate-700 font-medium flex items-center">
+                        <Label htmlFor="guideSelect" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
                           Style Guide Base <span className="text-red-500 ml-1">*</span>
                           <InfoTooltip text="The foundational style guide that dictates the prose, tone, and formatting of the generated character card." />
                         </Label>
@@ -1061,7 +1177,7 @@ export default function App() {
                           id="guideSelect"
                           value={forgeSelectedGuide}
                           onChange={(e) => setForgeSelectedGuide(e.target.value)}
-                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                          className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
                         >
                           <option value="" disabled>Select a saved guide...</option>
                           {guides.map((g) => (
@@ -1074,25 +1190,51 @@ export default function App() {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="templateSelect" className="text-slate-700 font-medium flex items-center">
-                          Card Template <span className="text-slate-400 font-normal ml-2 text-xs">(Optional)</span>
+                        <Label htmlFor="templateSelect" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                          Card Template <span className="text-slate-400 font-normal ml-2 text-xs normal-case tracking-normal">(Optional)</span>
                           <InfoTooltip text="Optional structural template to format the character card's fields. If omitted, the style guide will dictate the format." />
                         </Label>
-                        <select
-                          id="templateSelect"
-                          value={forgeSelectedTemplate}
-                          onChange={(e) => setForgeSelectedTemplate(e.target.value)}
-                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
-                        >
-                          <option value="">None (Use Style Guide)</option>
-                          {DEFAULT_TEMPLATES.map((t) => (
-                            <option key={t.id} value={t.id}>{t.name}</option>
-                          ))}
-                        </select>
+                        <div className="flex gap-2">
+                          <select
+                            id="templateSelect"
+                            value={forgeSelectedTemplate}
+                            onChange={(e) => setForgeSelectedTemplate(e.target.value)}
+                            className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
+                          >
+                            <option value="">None (Use Style Guide)</option>
+                            <optgroup label="Default Templates">
+                              {DEFAULT_TEMPLATES.map((t) => (
+                                <option key={t.id} value={t.id}>{t.name}</option>
+                              ))}
+                            </optgroup>
+                            {customTemplates.length > 0 && (
+                              <optgroup label="Custom Templates">
+                                {customTemplates.map((t) => (
+                                  <option key={t.id} value={t.id}>{t.name}</option>
+                                ))}
+                              </optgroup>
+                            )}
+                          </select>
+                          <Button
+                            variant="outline"
+                            className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            onClick={() => document.getElementById('template-upload')?.click()}
+                            title="Upload Custom Template"
+                          >
+                            <Upload className="w-4 h-4" />
+                          </Button>
+                          <input
+                            type="file"
+                            id="template-upload"
+                            className="hidden"
+                            accept=".txt,.md,.json"
+                            onChange={handleTemplateUpload}
+                          />
+                        </div>
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="charName" className="text-slate-700 font-medium flex items-center">
+                        <Label htmlFor="charName" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
                           Character Name <span className="text-red-500 ml-1">*</span>
                           <InfoTooltip text="The full name or nickname of the character. Example: 'Silas Thorne' or 'Captain Elara'." />
                         </Label>
@@ -1101,12 +1243,12 @@ export default function App() {
                           placeholder="e.g. Silas Thorne"
                           value={forgeName}
                           onChange={(e) => setForgeName(e.target.value)}
-                          className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                          className="h-11 rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
                         />
                       </div>
 
                       <div className="space-y-2 relative">
-                        <Label htmlFor="charConcept" className="text-slate-700 font-medium flex items-center justify-between">
+                        <Label htmlFor="charConcept" className="text-slate-700 font-medium flex items-center justify-between tracking-wide text-sm uppercase">
                           <span className="flex items-center">
                             Core Concept / Archetype <span className="text-red-500 ml-1">*</span>
                             <InfoTooltip text="The fundamental trope or personality type. Example: 'The Grumpy Bodyguard' or 'A cynical detective with a heart of gold'." />
@@ -1116,7 +1258,7 @@ export default function App() {
                             size="sm"
                             onClick={handleSuggestArchetype}
                             disabled={isSuggestingArchetype || forgeSlots.length === 0}
-                            className="h-6 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-2"
+                            className="h-6 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-2 normal-case tracking-normal"
                           >
                             {isSuggestingArchetype ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
                             Auto-Suggest
@@ -1127,20 +1269,20 @@ export default function App() {
                           placeholder="e.g. The Cold Grumpy Alpha / Brooding Bodyguard"
                           value={forgeConcept}
                           onChange={(e) => setForgeConcept(e.target.value)}
-                          className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                          className="h-11 rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
                           autoComplete="off"
                         />
                       </div>
 
                       {isExtractingSlots ? (
-                        <div className="flex items-center justify-center py-8 text-slate-500">
-                          <Loader2 className="w-6 h-6 animate-spin mr-2" />
-                          Extracting character details from style guide...
+                        <div className="flex items-center justify-center py-12 text-slate-500 bg-[#f9f8f6] rounded-xl border border-dashed border-[#e5e4e2]">
+                          <Loader2 className="w-6 h-6 animate-spin mr-2 text-[#8B3A3A]" />
+                          <span className="font-medium">Extracting character details...</span>
                         </div>
                       ) : (
                         forgeSlots.map((slot, index) => (
                           <div key={index} className="space-y-2">
-                            <Label htmlFor={`slot-${index}`} className="text-slate-700 font-medium flex items-center">
+                            <Label htmlFor={`slot-${index}`} className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
                               {slot.name}
                               <InfoTooltip text={slot.description} />
                             </Label>
@@ -1153,7 +1295,7 @@ export default function App() {
                                 newSlots[index].value = e.target.value;
                                 setForgeSlots(newSlots);
                               }}
-                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] min-h-[100px]"
+                              className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all min-h-[100px] resize-y"
                             />
                           </div>
                         ))
@@ -1162,7 +1304,7 @@ export default function App() {
                       <Button 
                         onClick={handleForgeCard} 
                         disabled={isForging || !forgeName || !forgeConcept || !forgeSelectedGuide} 
-                        className="w-full rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white py-6 text-lg shadow-md shadow-[#8B3A3A]/20 transition-all"
+                        className="w-full rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white py-6 text-lg shadow-md shadow-[#8B3A3A]/20 transition-all hover:scale-[1.02] active:scale-[0.98] mt-4"
                       >
                         {isForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
                         Forge Character
@@ -1170,14 +1312,15 @@ export default function App() {
                     </div>
 
                     {/* Output Preview */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm flex flex-col h-full">
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
-                        <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900">Forged Output</h3>
+                        <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Forged Output</h3>
                         {forgedCard && (
                           <Button 
                             onClick={downloadForgedCard}
                             variant="outline"
-                            className="rounded-full border-[#e5e4e2] hover:bg-[#f9f8f6] text-[#8B3A3A] w-full sm:w-auto"
+                            className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 w-full sm:w-auto transition-colors"
                           >
                             <Download className="w-4 h-4 mr-2" />
                             Download JSON
@@ -1197,35 +1340,35 @@ export default function App() {
                         <ScrollArea className="flex-1 -mx-4 px-4">
                           <div className="space-y-6 pb-4">
                             <div>
-                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Name</h4>
-                              <p className="text-slate-900 font-medium">{forgedCard.name}</p>
+                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Name</h4>
+                              <p className="text-slate-900 font-medium text-lg">{forgedCard.name}</p>
                             </div>
                             
                             <div>
-                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Description</h4>
-                              <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Description</h4>
+                              <div className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 whitespace-pre-wrap font-mono border border-[#e5e4e2]/50 shadow-inner">
                                 {forgedCard.description}
                               </div>
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Personality</h4>
-                              <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Personality</h4>
+                              <div className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 whitespace-pre-wrap font-mono border border-[#e5e4e2]/50 shadow-inner">
                                 {forgedCard.personality}
                               </div>
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">First Message</h4>
-                              <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">First Message</h4>
+                              <div className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 whitespace-pre-wrap font-mono border border-[#e5e4e2]/50 shadow-inner">
                                 {forgedCard.first_mes}
                               </div>
                             </div>
 
                             {forgedCard.scenario && (
                               <div>
-                                <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Scenario</h4>
-                                <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Scenario</h4>
+                                <div className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 whitespace-pre-wrap font-mono border border-[#e5e4e2]/50 shadow-inner">
                                   {forgedCard.scenario}
                                 </div>
                               </div>
@@ -1233,8 +1376,8 @@ export default function App() {
 
                             {forgedCard.mes_example && (
                               <div>
-                                <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Example Messages</h4>
-                                <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Example Messages</h4>
+                                <div className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 whitespace-pre-wrap font-mono border border-[#e5e4e2]/50 shadow-inner">
                                   {forgedCard.mes_example}
                                 </div>
                               </div>
@@ -1243,11 +1386,11 @@ export default function App() {
                         </ScrollArea>
                       ) : (
                         <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
-                          <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
-                            <Wand2 className="w-6 h-6 text-slate-400" />
+                          <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f9f8f6] border border-[#e5e4e2] flex items-center justify-center mb-6 shadow-sm">
+                            <Wand2 className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
                           </div>
-                          <h4 className="text-lg font-serif font-medium text-slate-900">Awaiting Input</h4>
-                          <p className="text-slate-500 mt-2 max-w-xs text-sm">
+                          <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Awaiting Input</h4>
+                          <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
                             Fill out the details on the left and click Forge Character to see the result here.
                           </p>
                         </div>
