@@ -559,13 +559,29 @@ export default function App() {
     localStorage.setItem("st_custom_templates", JSON.stringify(customTemplates));
   }, [customTemplates]);
 
+  const lastExtractedRef = useRef<{ guide: string, template: string }>({ guide: "", template: "" });
+
   useEffect(() => {
-    if (!forgeSelectedGuide) {
+    if (!forgeSelectedGuide && !forgeSelectedTemplate) {
       setForgeSlots([]);
+      lastExtractedRef.current = { guide: "", template: "" };
       return;
     }
     
+    // Check if we actually need to extract
+    if (forgeSelectedTemplate) {
+      if (lastExtractedRef.current.template === forgeSelectedTemplate) {
+        lastExtractedRef.current.guide = forgeSelectedGuide;
+        return;
+      }
+    } else if (forgeSelectedGuide) {
+      if (lastExtractedRef.current.guide === forgeSelectedGuide && !lastExtractedRef.current.template) {
+        return;
+      }
+    }
+
     setIsExtractingSlots(true);
+    lastExtractedRef.current = { guide: forgeSelectedGuide, template: forgeSelectedTemplate };
 
     if (forgeSelectedTemplate) {
       const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
@@ -585,19 +601,23 @@ export default function App() {
       }
     }
 
-    const guide = guides.find(g => g.id === forgeSelectedGuide);
-    if (guide) {
-      import("./lib/api").then(({ extractSlotsFromGuide }) => {
-        extractSlotsFromGuide(provider, apiKeys, guide.content, apiModels[provider]).then(slots => {
-          setForgeSlots(prev => {
-            return slots.map(s => {
-              const existing = prev.find(p => p.name === s.name);
-              return { ...s, value: existing ? existing.value : "" };
+    if (forgeSelectedGuide) {
+      const guide = guides.find(g => g.id === forgeSelectedGuide);
+      if (guide) {
+        import("./lib/api").then(({ extractSlotsFromGuide }) => {
+          extractSlotsFromGuide(provider, apiKeys, guide.content, apiModels[provider]).then(slots => {
+            setForgeSlots(prev => {
+              return slots.map(s => {
+                const existing = prev.find(p => p.name === s.name);
+                return { ...s, value: existing ? existing.value : "" };
+              });
             });
+            setIsExtractingSlots(false);
           });
-          setIsExtractingSlots(false);
         });
-      });
+      } else {
+        setIsExtractingSlots(false);
+      }
     } else {
       setIsExtractingSlots(false);
     }
