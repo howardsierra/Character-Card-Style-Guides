@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 
 export function useHistory<T>(initialState: T, debounceMs: number = 500) {
   const [state, setState] = useState<T>(initialState);
@@ -17,39 +17,43 @@ export function useHistory<T>(initialState: T, debounceMs: number = 500) {
   const set = useCallback((value: T | ((prev: T) => T)) => {
     setState((prev) => {
       const nextState = typeof value === 'function' ? (value as Function)(prev) : value;
-      
       if (JSON.stringify(prev) === JSON.stringify(nextState)) {
         return prev;
       }
-
-      // If we are making a change while not at the end of history,
-      // we should immediately truncate the future history so Redo is disabled.
-      setHistory((prevHistory) => {
-        if (pointerRef.current < prevHistory.length - 1) {
-          return prevHistory.slice(0, pointerRef.current + 1);
-        }
-        return prevHistory;
-      });
-
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-
-      timeoutRef.current = setTimeout(() => {
-        if (JSON.stringify(lastSavedStateRef.current) !== JSON.stringify(nextState)) {
-          setHistory((prevHistory) => {
-            const newHistory = prevHistory.slice(0, pointerRef.current + 1);
-            newHistory.push(nextState);
-            return newHistory;
-          });
-          setPointer((prevPointer) => prevPointer + 1);
-          lastSavedStateRef.current = nextState;
-        }
-      }, debounceMs);
-
       return nextState;
     });
-  }, [debounceMs]);
+  }, []);
+
+  useEffect(() => {
+    if (JSON.stringify(lastSavedStateRef.current) === JSON.stringify(state)) {
+      return;
+    }
+
+    // If we are making a change while not at the end of history,
+    // we should immediately truncate the future history so Redo is disabled.
+    setHistory((prevHistory) => {
+      if (pointerRef.current < prevHistory.length - 1) {
+        return prevHistory.slice(0, pointerRef.current + 1);
+      }
+      return prevHistory;
+    });
+
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+
+    timeoutRef.current = setTimeout(() => {
+      if (JSON.stringify(lastSavedStateRef.current) !== JSON.stringify(state)) {
+        setHistory((prevHistory) => {
+          const newHistory = prevHistory.slice(0, pointerRef.current + 1);
+          newHistory.push(state);
+          return newHistory;
+        });
+        setPointer((prevPointer) => prevPointer + 1);
+        lastSavedStateRef.current = state;
+      }
+    }, debounceMs);
+  }, [state, debounceMs]);
 
   // Force save current state to history immediately
   const saveHistory = useCallback(() => {
@@ -109,5 +113,7 @@ export function useHistory<T>(initialState: T, debounceMs: number = 500) {
     };
   }, []);
 
-  return [state, set, { undo, redo, canUndo, canRedo }] as const;
+  const historyObj = useMemo(() => ({ undo, redo, canUndo, canRedo }), [undo, redo, canUndo, canRedo]);
+
+  return [state, set, historyObj] as const;
 }

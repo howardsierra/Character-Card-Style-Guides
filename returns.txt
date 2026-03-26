@@ -1,0 +1,43 @@
+46:  return (
+59:  return (
+229:      if (!key && p !== "gemini" && p !== "openai" && p !== "anthropic" && p !== "openrouter") return;
+238:            return { ...prev, [p]: models[0].id };
+240:          return prev;
+278:    if (!e.target.files?.length) return;
+362:    if (!file) return;
+370:        return newCards;
+378:    if (!file) return;
+429:    if (cards.length === 0) return;
+447:    if (selectedGuides.size < 2) return;
+469:    if (!currentGuide) return;
+472:    if (!title) return; // Cancelled
+487:    if (!currentGuideId || !editedGuideContent) return;
+495:        return {
+502:      return g;
+510:    if (!currentGuideId) return;
+518:        return {
+525:      return g;
+533:    if (!guideRef.current) return;
+545:    if (!currentGuide) return;
+591:      return;
+598:        return;
+602:        return;
+615:              return slots.map(s => {
+617:                return { ...s, value: existing ? existing.value : "" };
+623:        return;
+633:              return slots.map(s => {
+635:                return { ...s, value: existing ? existing.value : "" };
+651:      if (view !== "create") return;
+668:    return () => window.removeEventListener('keydown', handleKeyDown);
+672:    if (!universeSelectedGuide) return;
+674:    if (!guide) return;
+691:    if (!forgeName || !forgeConcept || !forgeSelectedGuide) return;
+694:    if (!guide) return;
+737:    if (forgeSlots.length === 0 || forgeConcept.trim() !== "" || isSuggestingArchetype) return;
+748:      return;
+756:          return { ...slot, value: filledData[slot.name] };
+758:        return slot;
+769:    if (!forgedCard) return;
+792:    if (!forgedCard) return;
+804:  return (
+1703:                                    return next;

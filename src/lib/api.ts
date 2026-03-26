@@ -527,10 +527,19 @@ export async function extractUniverse(
   provider: AIProvider,
   keys: ApiKeys,
   styleGuide: string,
-  model?: string
+  model?: string,
+  savedCards?: { name: string; concept: string; description: string }[]
 ): Promise<UniverseData> {
+  let cardsContext = "";
+  if (savedCards && savedCards.length > 0) {
+    cardsContext = `\n\nAdditionally, here are some saved character cards in the library. Include them in the universe map and infer their relationships based on their descriptions and the style guide:\n`;
+    savedCards.forEach(card => {
+      cardsContext += `- Name: ${card.name}\n  Concept: ${card.concept}\n  Description: ${card.description}\n`;
+    });
+  }
+
   const prompt = `Analyze the following Style Guide, specifically looking for sections like "Relationship & Supporting Cast Writing" or "The NPC-to-Protagonist Pipeline" or "Shared Universes".
-Extract all mentioned characters and their relationships, as well as the "pipeline" progression (e.g., Character A was an NPC in Character B's story, then got their own card).
+Extract all mentioned characters and their relationships, as well as the "pipeline" progression (e.g., Character A was an NPC in Character B's story, then got their own card).${cardsContext}
 
 Return ONLY a valid JSON object with two arrays: "nodes" and "links".
 - "nodes" should be an array of objects: { "id": "unique_id", "name": "Character Name", "group": "Universe/Group Name", "description": "Short description" }
@@ -629,6 +638,47 @@ ${styleGuide}`;
   } catch (error) {
     console.error("Error extracting universe:", error);
     return { nodes: [], links: [] };
+  }
+}
+
+export async function autoFillSlots(
+  provider: AIProvider,
+  keys: ApiKeys,
+  name: string,
+  concept: string,
+  slots: { name: string; description: string; value: string }[],
+  model?: string
+): Promise<Record<string, string>> {
+  const emptySlots = slots.filter(s => !s.value.trim());
+  if (emptySlots.length === 0) return {};
+
+  const slotsPrompt = emptySlots.map(s => `- ${s.name}: ${s.description}`).join("\n");
+
+  const prompt = `You are an expert character creator. I am building a character named "${name}" with the core concept/archetype of "${concept}".
+  
+Please generate appropriate content for the following character fields.
+Return ONLY a JSON object where the keys are the exact field names and the values are the generated content.
+
+FIELDS TO FILL:
+${slotsPrompt}`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character creator. Output only valid JSON.",
+    true,
+    4000,
+    model
+  );
+
+  try {
+    const match = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    const jsonStr = match ? match[1] : responseText;
+    return JSON.parse(jsonStr.trim());
+  } catch (e) {
+    console.error("Failed to parse auto-fill response", e);
+    return {};
   }
 }
 

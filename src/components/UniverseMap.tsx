@@ -1,15 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
 import * as d3 from 'd3';
 import { UniverseData, UniverseNode, UniverseLink } from '../lib/api';
+import { Button } from './ui/button';
+import { Label } from './ui/label';
+import { Input } from './ui/input';
 
 interface UniverseMapProps {
   data: UniverseData;
+  onAddLink?: (sourceId: string, targetId: string, type: "relationship" | "pipeline", label: string) => void;
 }
 
-export default function UniverseMap({ data }: UniverseMapProps) {
+export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [selectedNode, setSelectedNode] = useState<UniverseNode | null>(null);
+  const [isAddingLink, setIsAddingLink] = useState(false);
+  const [newLinkTarget, setNewLinkTarget] = useState("");
+  const [newLinkType, setNewLinkType] = useState<"relationship" | "pipeline">("relationship");
+  const [newLinkLabel, setNewLinkLabel] = useState("");
 
   useEffect(() => {
     if (!data || !data.nodes.length || !svgRef.current || !containerRef.current) return;
@@ -95,6 +103,7 @@ export default function UniverseMap({ data }: UniverseMapProps) {
       )
       .on("click", (event, d) => {
         setSelectedNode(d as UniverseNode);
+        setIsAddingLink(false);
         event.stopPropagation();
       });
 
@@ -114,7 +123,10 @@ export default function UniverseMap({ data }: UniverseMapProps) {
       .text(d => d.name);
 
     // Background click to deselect
-    svg.on("click", () => setSelectedNode(null));
+    svg.on("click", () => {
+      setSelectedNode(null);
+      setIsAddingLink(false);
+    });
 
     simulation.on("tick", () => {
       link
@@ -164,16 +176,189 @@ export default function UniverseMap({ data }: UniverseMapProps) {
     };
   }, [data]);
 
+  const handleSaveLink = () => {
+    if (selectedNode && newLinkTarget && onAddLink) {
+      onAddLink(selectedNode.id, newLinkTarget, newLinkType, newLinkLabel);
+      setIsAddingLink(false);
+      setNewLinkTarget("");
+      setNewLinkLabel("");
+      setNewLinkType("relationship");
+    }
+  };
+
   return (
     <div className="relative w-full h-full flex flex-col md:flex-row" ref={containerRef}>
       <svg ref={svgRef} className="w-full h-full min-h-[400px] bg-slate-50 rounded-2xl border border-[#e5e4e2]" />
       
       {selectedNode && (
-        <div className="absolute top-4 right-4 w-64 bg-white/90 backdrop-blur-sm p-4 rounded-xl shadow-lg border border-[#e5e4e2] z-10">
-          <h3 className="font-serif font-medium text-lg text-slate-900">{selectedNode.name}</h3>
-          <p className="text-xs font-medium text-[#8B3A3A] uppercase tracking-wider mt-1">{selectedNode.group}</p>
+        <div className="absolute top-4 right-4 w-80 bg-white/90 backdrop-blur-sm p-4 rounded-xl shadow-lg border border-[#e5e4e2] z-10 max-h-[80vh] overflow-y-auto">
+          <div className="flex justify-between items-start">
+            <div>
+              <h3 className="font-serif font-medium text-lg text-slate-900">{selectedNode.name}</h3>
+              <p className="text-xs font-medium text-[#8B3A3A] uppercase tracking-wider mt-1">{selectedNode.group}</p>
+            </div>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setSelectedNode(null); setIsAddingLink(false); }}
+              className="text-slate-400 hover:text-slate-600 transition-colors"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+            </button>
+          </div>
+          
           {selectedNode.description && (
             <p className="text-sm text-slate-600 mt-3 leading-relaxed">{selectedNode.description}</p>
+          )}
+
+          {isAddingLink ? (
+            <div className="mt-5 space-y-4 border-t border-[#e5e4e2] pt-4">
+              <h4 className="text-sm font-bold text-slate-800">Add New Link</h4>
+              
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-600">Target Character</Label>
+                <select 
+                  value={newLinkTarget}
+                  onChange={(e) => setNewLinkTarget(e.target.value)}
+                  className="w-full h-9 rounded-md border border-[#e5e4e2] bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                >
+                  <option value="" disabled>Select a character...</option>
+                  {data.nodes.filter(n => n.id !== selectedNode.id).map(n => (
+                    <option key={n.id} value={n.id}>{n.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-600">Link Type</Label>
+                <select 
+                  value={newLinkType}
+                  onChange={(e) => setNewLinkType(e.target.value as any)}
+                  className="w-full h-9 rounded-md border border-[#e5e4e2] bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                >
+                  <option value="relationship">Relationship</option>
+                  <option value="pipeline">Pipeline</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs text-slate-600">
+                  Description {newLinkType === "relationship" && "(e.g., Siblings, Rivals)"}
+                </Label>
+                <Input 
+                  value={newLinkLabel}
+                  onChange={(e) => setNewLinkLabel(e.target.value)}
+                  placeholder="Short description..."
+                  className="h-9 text-sm"
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <Button 
+                  size="sm" 
+                  variant="outline" 
+                  className="flex-1 h-8 text-xs"
+                  onClick={() => setIsAddingLink(false)}
+                >
+                  Cancel
+                </Button>
+                <Button 
+                  size="sm" 
+                  className="flex-1 h-8 text-xs bg-[#8B3A3A] hover:bg-[#7a3333] text-white"
+                  onClick={handleSaveLink}
+                  disabled={!newLinkTarget}
+                >
+                  Save Link
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Relationships and Pipelines */}
+              {(() => {
+                const connectedLinks = data.links.filter(
+                  l => {
+                    const sourceId = typeof l.source === 'object' ? (l.source as any).id : l.source;
+                    const targetId = typeof l.target === 'object' ? (l.target as any).id : l.target;
+                    return sourceId === selectedNode.id || targetId === selectedNode.id;
+                  }
+                );
+
+                const pipelinesOut = connectedLinks.filter(l => l.type === 'pipeline' && (typeof l.source === 'object' ? (l.source as any).id : l.source) === selectedNode.id);
+                const pipelinesIn = connectedLinks.filter(l => l.type === 'pipeline' && (typeof l.target === 'object' ? (l.target as any).id : l.target) === selectedNode.id);
+                const relationships = connectedLinks.filter(l => l.type === 'relationship');
+
+                const getNodeName = (id: string) => data.nodes.find(n => n.id === id)?.name || id;
+
+                return (
+                  <div className="mt-5 space-y-5">
+                    {pipelinesIn.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-[#e5e4e2] pb-1">Originated From</h4>
+                        <ul className="space-y-2">
+                          {pipelinesIn.map((l, i) => {
+                            const sourceId = typeof l.source === 'object' ? (l.source as any).id : l.source;
+                            return (
+                              <li key={i} className="text-sm">
+                                <span className="font-medium text-slate-700">{getNodeName(sourceId)}</span>
+                                {l.label && <span className="text-slate-500 block text-xs mt-0.5">{l.label}</span>}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
+                    {pipelinesOut.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-[#e5e4e2] pb-1">Pipeline To</h4>
+                        <ul className="space-y-2">
+                          {pipelinesOut.map((l, i) => {
+                            const targetId = typeof l.target === 'object' ? (l.target as any).id : l.target;
+                            return (
+                              <li key={i} className="text-sm">
+                                <span className="font-medium text-slate-700">{getNodeName(targetId)}</span>
+                                {l.label && <span className="text-slate-500 block text-xs mt-0.5">{l.label}</span>}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
+                    {relationships.length > 0 && (
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-[#e5e4e2] pb-1">Relationships</h4>
+                        <ul className="space-y-2">
+                          {relationships.map((l, i) => {
+                            const sourceId = typeof l.source === 'object' ? (l.source as any).id : l.source;
+                            const targetId = typeof l.target === 'object' ? (l.target as any).id : l.target;
+                            const otherId = sourceId === selectedNode.id ? targetId : sourceId;
+                            return (
+                              <li key={i} className="text-sm">
+                                <span className="font-medium text-slate-700">{getNodeName(otherId)}</span>
+                                {l.label && <span className="text-slate-500 block text-xs mt-0.5">{l.label}</span>}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    )}
+
+                    {onAddLink && (
+                      <div className="pt-2">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="w-full h-8 text-xs border-dashed border-slate-300 text-slate-600 hover:text-[#8B3A3A] hover:border-[#8B3A3A] hover:bg-[#8B3A3A]/5"
+                          onClick={() => setIsAddingLink(true)}
+                        >
+                          + Add Link
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </>
           )}
         </div>
       )}
