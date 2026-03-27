@@ -28,19 +28,35 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
           { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview" },
           { id: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite Preview" },
           { id: "gemini-2.5-pro-preview", name: "Gemini 2.5 Pro Preview" },
-          { id: "gemini-2.5-flash-preview", name: "Gemini 2.5 Flash Preview" }
+          { id: "gemini-2.5-flash-preview", name: "Gemini 2.5 Flash Preview" },
+          { id: "gemini-3.1-flash-image-preview", name: "Gemini 3.1 Flash Image Preview (Nano Banana 2)" },
+          { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image (Nano Banana)" }
         ];
         if (!key) return defaultModels;
         try {
           const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
           if (!res.ok) throw new Error("Failed to fetch Gemini models");
           const data = await res.json();
-          return data.models
+          const fetchedModels = data.models
             .filter((m: any) => m.supportedGenerationMethods.includes("generateContent"))
             .map((m: any) => ({
               id: m.name.replace("models/", ""),
               name: m.displayName || m.name.replace("models/", "")
             }));
+            
+          // Ensure image models are always available
+          const imageModels = [
+            { id: "gemini-3.1-flash-image-preview", name: "Gemini 3.1 Flash Image Preview (Nano Banana 2)" },
+            { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image (Nano Banana)" }
+          ];
+          
+          for (const im of imageModels) {
+            if (!fetchedModels.find((m: any) => m.id === im.id)) {
+              fetchedModels.push(im);
+            }
+          }
+          
+          return fetchedModels;
         } catch (e) {
           console.warn("Could not fetch Gemini models, using defaults", e);
           return defaultModels;
@@ -139,7 +155,9 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
         { id: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview" },
         { id: "gemini-3.1-flash-lite-preview", name: "Gemini 3.1 Flash Lite Preview" },
         { id: "gemini-2.5-pro-preview", name: "Gemini 2.5 Pro Preview" },
-        { id: "gemini-2.5-flash-preview", name: "Gemini 2.5 Flash Preview" }
+        { id: "gemini-2.5-flash-preview", name: "Gemini 2.5 Flash Preview" },
+        { id: "gemini-3.1-flash-image-preview", name: "Gemini 3.1 Flash Image Preview (Nano Banana 2)" },
+        { id: "gemini-2.5-flash-image", name: "Gemini 2.5 Flash Image (Nano Banana)" }
       ];
     }
     return [];
@@ -526,30 +544,32 @@ export interface UniverseData {
 export async function extractUniverse(
   provider: AIProvider,
   keys: ApiKeys,
-  styleGuide: string,
+  styleGuide: string | undefined,
   model?: string,
   savedCards?: { name: string; concept: string; description: string }[]
 ): Promise<UniverseData> {
   let cardsContext = "";
   if (savedCards && savedCards.length > 0) {
-    cardsContext = `\n\nAdditionally, here are some saved character cards in the library. Include them in the universe map and infer their relationships based on their descriptions and the style guide:\n`;
+    cardsContext = `\n\nHere are the saved character cards in the library. You MUST include them in the universe map and infer their relationships with each other, as well as with any objects, locations, or factions mentioned in their descriptions${styleGuide ? ' and the style guide' : ''}:\n`;
     savedCards.forEach(card => {
       cardsContext += `- Name: ${card.name}\n  Concept: ${card.concept}\n  Description: ${card.description}\n`;
     });
   }
 
-  const prompt = `Analyze the following Style Guide, specifically looking for sections like "Relationship & Supporting Cast Writing" or "The NPC-to-Protagonist Pipeline" or "Shared Universes".
-Extract all mentioned characters and their relationships, as well as the "pipeline" progression (e.g., Character A was an NPC in Character B's story, then got their own card).${cardsContext}
+  const prompt = `Analyze the following ${styleGuide ? 'Style Guide and character cards' : 'character cards'} to build a comprehensive, highly interconnected relationship map.
+Look for characters, important objects, artifacts, locations, factions, and their relationships. 
+CRITICAL: You must create an ACTUAL relationship map. Do not just list entities. You must infer and create logical links between the characters, objects, and locations based on their descriptions and concepts.
+Also look for "pipeline" progressions (e.g., Character A was an NPC in Character B's story, then got their own card).${cardsContext}
 
 Return ONLY a valid JSON object with two arrays: "nodes" and "links".
-- "nodes" should be an array of objects: { "id": "unique_id", "name": "Character Name", "group": "Universe/Group Name", "description": "Short description" }
-- "links" should be an array of objects: { "source": "source_node_id", "target": "target_node_id", "type": "relationship" or "pipeline", "label": "Short description of link" }
+- "nodes" should be an array of objects: { "id": "unique_id", "name": "Entity Name", "group": "character" | "object" | "location" | "faction" | "archetype", "description": "Short description" }
+- "links" should be an array of objects: { "source": "source_node_id", "target": "target_node_id", "type": "relationship" or "pipeline", "label": "Short description of link (e.g., 'Wields', 'Located In', 'Rivals', 'Allies With', 'Created')" }
 
 For "pipeline" links, the source is the original character/card where they appeared as an NPC, and the target is the character who was promoted.
-For "relationship" links, it's just a connection between two characters in the same universe.
+For "relationship" links, it's a connection between any two entities (e.g., a character and an object, two characters, a character and a faction). Make sure to include many relationship links to make the map interconnected.
 
 STYLE GUIDE:
-${styleGuide}`;
+${styleGuide || "No style guide provided. Rely entirely on the character cards above to build the relationship map."}`;
 
   const parseResponse = (text: string): UniverseData => {
     try {
@@ -720,4 +740,55 @@ export async function mergeStyleGuides(
   const prompt = `Here are multiple style guides:\n\n${guidesData}\n\nPlease merge them into a single, cohesive, comprehensive style guide that combines the insights, patterns, and formatting rules from all of them. Maintain the same 14-section structure as requested before. Ensure the final output is well-organized and eliminates redundancies while preserving unique details from each guide.`;
 
   return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 4000, model);
+}
+
+export async function generateImagePrompt(
+  provider: AIProvider,
+  keys: ApiKeys,
+  characterDetails: string,
+  model?: string
+): Promise<string> {
+  const prompt = `Based on the following character details, generate a highly detailed, descriptive prompt suitable for an AI image generator like Midjourney (Niji journey) or Stable Diffusion.
+Focus heavily on physical appearance, clothing, colors, lighting, pose, and background/setting.
+Do not include any conversational text. Return ONLY the raw prompt string.
+
+CHARACTER DETAILS:
+${characterDetails}`;
+
+  return callAIProvider(provider, keys, prompt, "You are an expert AI image prompt engineer.", false, 1000, model);
+}
+
+export async function generateCharacterImage(
+  keys: ApiKeys,
+  prompt: string,
+  model: string = "gemini-3.1-flash-image-preview"
+): Promise<string> {
+  try {
+    const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY || "dummy" });
+    const response = await ai.models.generateContent({
+      model: model,
+      contents: {
+        parts: [
+          { text: prompt },
+        ],
+      },
+      config: {
+        imageConfig: {
+          aspectRatio: "3:4",
+          ...(model === "gemini-3.1-flash-image-preview" ? { imageSize: "1K" } : {})
+        }
+      }
+    });
+
+    for (const part of response.candidates?.[0]?.content?.parts || []) {
+      if (part.inlineData) {
+        const base64EncodeString: string = part.inlineData.data;
+        return `data:image/png;base64,${base64EncodeString}`;
+      }
+    }
+    throw new Error("No image data returned from the model.");
+  } catch (err) {
+    console.error("Image generation failed:", err);
+    throw err;
+  }
 }

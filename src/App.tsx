@@ -19,7 +19,7 @@ import UniverseMap from "./components/UniverseMap";
 import { ModelSelector } from "./components/ModelSelector";
 import { useHistory } from "./hooks/useHistory";
 
-type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "settings";
+type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "image" | "settings";
 
 interface GuideVersion {
   id: string;
@@ -158,6 +158,19 @@ export default function App() {
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
   const [isAutoFilling, setIsAutoFilling] = useState(false);
   const [showSavedCards, setShowSavedCards] = useState(false);
+  
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [isGeneratingImagePrompt, setIsGeneratingImagePrompt] = useState(false);
+  const [characterImage, setCharacterImage] = useState("");
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+  // Image Studio State
+  const [studioImagePrompt, setStudioImagePrompt] = useState("");
+  const [isGeneratingStudioPrompt, setIsGeneratingStudioPrompt] = useState(false);
+  const [studioCharacterImage, setStudioCharacterImage] = useState("");
+  const [isGeneratingStudioImage, setIsGeneratingStudioImage] = useState(false);
+  const [studioSelectedCard, setStudioSelectedCard] = useState<string>("");
+
   const [forgedCardState, setForgedCardState, forgedCardHistory] = useHistory<CharacterCard | null>(null);
   const forgedCard = forgedCardState;
   const setForgedCard = setForgedCardState;
@@ -705,16 +718,17 @@ export default function App() {
   }, [view, forgeHistory]);
 
   const handleExtractUniverse = async () => {
-    if (!universeSelectedGuide) return;
+    if (!universeSelectedGuide && universeSelectedCards.size === 0) return;
+    
     const guide = guides.find(g => g.id === universeSelectedGuide);
-    if (!guide) return;
+    const guideContent = guide ? guide.content : undefined;
 
     setIsExtractingUniverse(true);
     try {
       const selectedSavedCards = savedCards.filter(c => universeSelectedCards.has(c.id));
       const cardsData = selectedSavedCards.map(c => ({ name: c.name, concept: c.concept, description: c.card.description }));
       const { currentProvider, currentModel } = getProviderAndModel("universe");
-      const data = await extractUniverse(currentProvider, apiKeys, guide.content, currentModel, cardsData);
+      const data = await extractUniverse(currentProvider, apiKeys, guideContent, currentModel, cardsData);
       setUniverseData(data);
     } catch (err) {
       console.error(err);
@@ -755,6 +769,120 @@ export default function App() {
     } finally {
       setIsForging(false);
     }
+  };
+
+  const handleGenerateImagePrompt = async () => {
+    if (!forgedCard) return;
+    setIsGeneratingImagePrompt(true);
+    try {
+      const { generateImagePrompt } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const details = JSON.stringify(forgedCard, null, 2);
+      const prompt = await generateImagePrompt(currentProvider, apiKeys, details, currentModel);
+      setImagePrompt(prompt);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate image prompt.");
+    } finally {
+      setIsGeneratingImagePrompt(false);
+    }
+  };
+
+  const handleGenerateImage = async () => {
+    if (!imagePrompt) return;
+    setIsGeneratingImage(true);
+    try {
+      const { generateCharacterImage } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_image");
+      
+      if (currentProvider !== "gemini") {
+        alert("Image generation is currently only supported with Gemini models.");
+        setIsGeneratingImage(false);
+        return;
+      }
+
+      // Default to gemini-3.1-flash-image-preview if no model is selected or if a text model is selected
+      let modelToUse = currentModel;
+      if (!modelToUse || !modelToUse.includes("image")) {
+        modelToUse = "gemini-3.1-flash-image-preview";
+      }
+
+      const imageBase64 = await generateCharacterImage(apiKeys, imagePrompt, modelToUse);
+      setCharacterImage(imageBase64);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate image. Please check your Gemini API key.");
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const handleGenerateStudioImagePrompt = async () => {
+    if (!studioSelectedCard) {
+      alert("Please select a character card first.");
+      return;
+    }
+    const card = savedCards.find(c => c.id === studioSelectedCard);
+    if (!card) return;
+
+    setIsGeneratingStudioPrompt(true);
+    try {
+      const { generateImagePrompt } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const details = JSON.stringify(card.card, null, 2);
+      const prompt = await generateImagePrompt(currentProvider, apiKeys, details, currentModel);
+      setStudioImagePrompt(prompt);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate image prompt.");
+    } finally {
+      setIsGeneratingStudioPrompt(false);
+    }
+  };
+
+  const handleGenerateStudioImage = async () => {
+    if (!studioImagePrompt) return;
+    setIsGeneratingStudioImage(true);
+    try {
+      const { generateCharacterImage } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_image");
+      
+      if (currentProvider !== "gemini") {
+        alert("Image generation is currently only supported with Gemini models.");
+        setIsGeneratingStudioImage(false);
+        return;
+      }
+
+      let modelToUse = currentModel;
+      if (!modelToUse || !modelToUse.includes("image")) {
+        modelToUse = "gemini-3.1-flash-image-preview";
+      }
+
+      const imageBase64 = await generateCharacterImage(apiKeys, studioImagePrompt, modelToUse);
+      setStudioCharacterImage(imageBase64);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate image. Please check your Gemini API key.");
+    } finally {
+      setIsGeneratingStudioImage(false);
+    }
+  };
+
+  const handleSaveStudioImage = () => {
+    if (!studioSelectedCard || !studioCharacterImage) return;
+    setSavedCards(prev => prev.map(c => {
+      if (c.id === studioSelectedCard) {
+        return {
+          ...c,
+          card: {
+            ...c.card,
+            image: studioCharacterImage
+          }
+        };
+      }
+      return c;
+    }));
+    alert("Image saved to character card!");
   };
 
   const handleSuggestArchetype = async () => {
@@ -819,6 +947,11 @@ export default function App() {
         extensions: {}
       }
     };
+
+    if (characterImage) {
+      // Add image to the card data if available
+      cardData.data.image = characterImage;
+    }
     
     const blob = new Blob([JSON.stringify(cardData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -833,11 +966,17 @@ export default function App() {
 
   const saveForgedCard = () => {
     if (!forgedCard) return;
+    
+    const cardToSave = { ...forgedCard };
+    if (characterImage) {
+      cardToSave.image = characterImage;
+    }
+
     const newSavedCard: SavedCard = {
       id: Date.now().toString(),
       name: forgeName || forgedCard.name,
       concept: forgeConcept,
-      card: forgedCard,
+      card: cardToSave,
       date: new Date().toISOString(),
     };
     setSavedCards(prev => [...prev, newSavedCard]);
@@ -882,6 +1021,7 @@ export default function App() {
           <NavButton view="generate" icon={FileText} label="Current Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
           <NavButton view="create" icon={Wand2} label="Card Forge" currentView={view} setView={setView} />
+          <NavButton view="image" icon={ImageIcon} label="Portrait Studio" currentView={view} setView={setView} />
           <NavButton view="universe" icon={Network} label="Universe Map" currentView={view} setView={setView} />
           <NavButton view="settings" icon={Settings} label="Configuration" currentView={view} setView={setView} />
         </nav>
@@ -1658,6 +1798,74 @@ export default function App() {
                       ) : forgedCard ? (
                         <ScrollArea className="flex-1 -mx-4 px-4">
                           <div className="space-y-6 pb-4">
+                            
+                            {/* Image Generation Section */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
+                                  <ImageIcon className="w-4 h-4 text-[#8B3A3A]" />
+                                  Character Portrait
+                                </h4>
+                                <ModelSelector
+                                  sectionId="forge_image"
+                                  globalProvider={provider}
+                                  globalModels={apiModels}
+                                  sectionConfigs={sectionConfigs}
+                                  setSectionConfigs={setSectionConfigs}
+                                  availableModels={availableModels}
+                                  isFetchingModels={isFetchingModels}
+                                  allowedProviders={["gemini"]}
+                                  filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
+                                />
+                              </div>
+                              
+                              <div className="flex flex-col md:flex-row gap-4">
+                                <div className="flex-1 space-y-3">
+                                  <Label className="text-xs font-bold tracking-widest text-slate-400 uppercase">Image Prompt</Label>
+                                  <Textarea 
+                                    value={imagePrompt}
+                                    onChange={(e) => setImagePrompt(e.target.value)}
+                                    placeholder="Click 'Generate Prompt' or write your own Midjourney/Niji prompt here..."
+                                    className="bg-white p-3 rounded-xl text-xs text-slate-700 font-mono border border-slate-200 min-h-[100px] focus-visible:ring-[#8B3A3A]/50"
+                                  />
+                                  <div className="flex gap-2">
+                                    <Button 
+                                      onClick={handleGenerateImagePrompt} 
+                                      disabled={isGeneratingImagePrompt}
+                                      variant="outline"
+                                      className="flex-1 rounded-xl text-xs h-9 border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A]"
+                                    >
+                                      {isGeneratingImagePrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
+                                      Generate Prompt
+                                    </Button>
+                                    <Button 
+                                      onClick={handleGenerateImage} 
+                                      disabled={isGeneratingImage || !imagePrompt}
+                                      className="flex-1 rounded-xl text-xs h-9 bg-[#8B3A3A] hover:bg-[#7a3333] text-white"
+                                    >
+                                      {isGeneratingImage ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <ImageIcon className="w-3 h-3 mr-2" />}
+                                      Generate Image
+                                    </Button>
+                                  </div>
+                                </div>
+                                
+                                <div className="w-full md:w-40 shrink-0 flex flex-col items-center justify-center">
+                                  <div className="w-32 h-40 md:w-full md:h-48 bg-white border border-slate-200 rounded-xl overflow-hidden flex items-center justify-center relative shadow-sm">
+                                    {isGeneratingImage ? (
+                                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm z-10">
+                                        <Loader2 className="w-6 h-6 text-[#8B3A3A] animate-spin mb-2" />
+                                        <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Generating</span>
+                                      </div>
+                                    ) : characterImage ? (
+                                      <img src={characterImage} alt="Character Portrait" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                    ) : (
+                                      <ImageIcon className="w-8 h-8 text-slate-300" />
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
                             <div>
                               <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Name</h4>
                               <Input 
@@ -1758,6 +1966,156 @@ export default function App() {
                 </motion.div>
               )}
 
+              {/* IMAGE STUDIO VIEW */}
+              {view === "image" && (
+                <motion.div
+                  key="image"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6 md:space-y-8"
+                >
+                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
+                    <div className="space-y-2">
+                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Portrait Studio</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light">
+                        Generate images for your characters using AI.
+                      </p>
+                    </div>
+                    <ModelSelector
+                      sectionId="forge_image"
+                      globalProvider={provider}
+                      globalModels={apiModels}
+                      sectionConfigs={sectionConfigs}
+                      setSectionConfigs={setSectionConfigs}
+                      availableModels={availableModels}
+                      isFetchingModels={isFetchingModels}
+                      allowedProviders={["gemini"]}
+                      filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 h-full">
+                    {/* Controls */}
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm flex flex-col h-full">
+                      <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-6">Image Settings</h3>
+                      
+                      <div className="space-y-6 flex-1">
+                        <div className="space-y-3">
+                          <Label htmlFor="studioCardSelect" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                            <BookOpen className="w-4 h-4 mr-2 text-[#8B3A3A]" />
+                            Select Character (Optional)
+                          </Label>
+                          <select
+                            id="studioCardSelect"
+                            value={studioSelectedCard}
+                            onChange={(e) => {
+                              setStudioSelectedCard(e.target.value);
+                              const card = savedCards.find(c => c.id === e.target.value);
+                              if (card && card.card.image) {
+                                setStudioCharacterImage(card.card.image);
+                              } else {
+                                setStudioCharacterImage("");
+                              }
+                            }}
+                            className="w-full h-12 rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] px-4 text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A] transition-all shadow-inner"
+                          >
+                            <option value="">No character selected</option>
+                            {savedCards.map(card => (
+                              <option key={card.id} value={card.id}>{card.name} - {card.concept}</option>
+                            ))}
+                          </select>
+                        </div>
+
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              <FileText className="w-4 h-4 mr-2 text-[#8B3A3A]" />
+                              Image Prompt
+                            </Label>
+                            {studioSelectedCard && (
+                              <Button 
+                                onClick={handleGenerateStudioImagePrompt} 
+                                disabled={isGeneratingStudioPrompt}
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A]"
+                              >
+                                {isGeneratingStudioPrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
+                                Auto-Generate Prompt
+                              </Button>
+                            )}
+                          </div>
+                          <Textarea 
+                            value={studioImagePrompt}
+                            onChange={(e) => setStudioImagePrompt(e.target.value)}
+                            placeholder="Describe the character's appearance, clothing, setting, and style..."
+                            className="bg-[#f9f8f6] p-4 rounded-xl text-sm text-slate-700 font-mono border border-[#e5e4e2] min-h-[200px] focus-visible:ring-[#8B3A3A]/50 shadow-inner"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="mt-8 pt-6 border-t border-[#e5e4e2]">
+                        <Button 
+                          onClick={handleGenerateStudioImage}
+                          disabled={isGeneratingStudioImage || !studioImagePrompt.trim()}
+                          className="w-full h-14 text-lg font-medium rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md hover:shadow-lg transition-all"
+                        >
+                          {isGeneratingStudioImage ? (
+                            <>
+                              <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                              Generating Image...
+                            </>
+                          ) : (
+                            <>
+                              <ImageIcon className="w-5 h-5 mr-2" />
+                              Generate Portrait
+                            </>
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {/* Image Preview */}
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
+                        <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Generated Portrait</h3>
+                        {studioCharacterImage && studioSelectedCard && (
+                          <Button 
+                            onClick={handleSaveStudioImage}
+                            variant="outline"
+                            className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                          >
+                            <Save className="w-4 h-4 mr-2" />
+                            Save to Character
+                          </Button>
+                        )}
+                      </div>
+
+                      <div className="flex-1 flex items-center justify-center bg-[#f9f8f6] border border-[#e5e4e2] rounded-2xl overflow-hidden relative min-h-[400px]">
+                        {isGeneratingStudioImage ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 backdrop-blur-sm z-10">
+                            <Loader2 className="w-12 h-12 text-[#8B3A3A] animate-spin mb-4" />
+                            <h4 className="text-xl font-serif font-medium text-slate-900">Painting...</h4>
+                            <p className="text-slate-500 mt-2 text-sm">This may take a few moments.</p>
+                          </div>
+                        ) : studioCharacterImage ? (
+                          <img src={studioCharacterImage} alt="Generated Portrait" className="w-full h-full object-contain" referrerPolicy="no-referrer" />
+                        ) : (
+                          <div className="text-center p-8">
+                            <ImageIcon className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+                            <p className="text-slate-500 font-medium">No image generated yet.</p>
+                            <p className="text-slate-400 text-sm mt-2">Enter a prompt and click Generate to see the result here.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
               {/* UNIVERSE MAP VIEW */}
               {view === "universe" && (
                 <motion.div
@@ -1790,7 +2148,7 @@ export default function App() {
                     <div className="flex flex-col md:flex-row gap-4 items-end">
                       <div className="space-y-2 flex-1 w-full">
                         <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
-                          Select Style Guide to Analyze
+                          Select Style Guide to Analyze (Optional)
                         </Label>
                         <select
                           id="universeGuideSelect"
@@ -1798,7 +2156,7 @@ export default function App() {
                           onChange={(e) => setUniverseSelectedGuide(e.target.value)}
                           className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
                         >
-                          <option value="" disabled>Select a saved guide...</option>
+                          <option value="">No guide selected (Use cards only)</option>
                           {guides.map((g) => (
                             <option key={g.id} value={g.id}>{g.title}</option>
                           ))}
@@ -1806,7 +2164,7 @@ export default function App() {
                       </div>
                       <Button 
                         onClick={handleExtractUniverse} 
-                        disabled={isExtractingUniverse || !universeSelectedGuide} 
+                        disabled={isExtractingUniverse || (!universeSelectedGuide && universeSelectedCards.size === 0)} 
                         className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
                       >
                         {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
@@ -1865,7 +2223,7 @@ export default function App() {
                         </div>
                         <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
                         <p className="text-slate-500 mt-2 max-w-xs text-sm">
-                          Select a style guide and click Extract Universe to visualize character relationships.
+                          Select a style guide or character cards, then click Extract Universe to visualize relationships.
                         </p>
                       </div>
                     )}

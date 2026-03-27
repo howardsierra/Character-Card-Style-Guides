@@ -30,8 +30,26 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove(); // Clear previous render
 
-    // Create a color scale for groups
-    const color = d3.scaleOrdinal(d3.schemeCategory10);
+    // Define colors and shapes based on entity type
+    const getColor = (group: string) => {
+      const g = (group || "").toLowerCase();
+      if (g.includes('object') || g.includes('artifact') || g.includes('item')) return '#b45309'; // Amber
+      if (g.includes('location') || g.includes('place') || g.includes('world')) return '#334155'; // Slate
+      if (g.includes('faction') || g.includes('group') || g.includes('organization')) return '#0f172a'; // Dark Slate
+      if (g.includes('archetype') || g.includes('concept')) return '#64748b'; // Light Slate
+      return '#8B3A3A'; // Crimson for characters/default
+    };
+
+    const getSymbol = (group: string) => {
+      const g = (group || "").toLowerCase();
+      let type = d3.symbolCircle;
+      if (g.includes('object') || g.includes('artifact') || g.includes('item')) type = d3.symbolDiamond;
+      else if (g.includes('location') || g.includes('place') || g.includes('world')) type = d3.symbolSquare;
+      else if (g.includes('faction') || g.includes('group') || g.includes('organization')) type = d3.symbolTriangle;
+      else if (g.includes('archetype') || g.includes('concept')) type = d3.symbolStar;
+      
+      return d3.symbol().type(type).size(400)();
+    };
 
     // Deep copy data to avoid mutating the original props
     const nodes = data.nodes.map(d => ({ ...d }));
@@ -107,9 +125,9 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
         event.stopPropagation();
       });
 
-    node.append("circle")
-      .attr("r", 20)
-      .attr("fill", d => color(d.group))
+    node.append("path")
+      .attr("d", d => getSymbol(d.group))
+      .attr("fill", d => getColor(d.group))
       .attr("stroke", "#fff")
       .attr("stroke-width", 2)
       .attr("class", "cursor-pointer transition-all hover:stroke-[#8B3A3A] hover:stroke-4");
@@ -364,14 +382,42 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
       )}
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-sm border border-[#e5e4e2] z-10 text-xs">
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-4 h-0.5 bg-[#8B3A3A]"></div>
-          <span className="text-slate-600">Pipeline Progression</span>
+      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-sm border border-[#e5e4e2] z-10 text-xs flex gap-6">
+        <div>
+          <div className="font-bold text-slate-800 mb-2 uppercase tracking-wider text-[10px]">Links</div>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-4 h-0.5 bg-[#8B3A3A]"></div>
+            <span className="text-slate-600">Pipeline Progression</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <div className="w-4 h-0 border-t border-dashed border-slate-400"></div>
+            <span className="text-slate-600">Relationship</span>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-0 border-t border-dashed border-slate-400"></div>
-          <span className="text-slate-600">Relationship / Shared Universe</span>
+        <div>
+          <div className="font-bold text-slate-800 mb-2 uppercase tracking-wider text-[10px]">Entities</div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-[#8B3A3A]"></div>
+              <span className="text-slate-600">Character</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-2.5 h-2.5 rotate-45 bg-[#b45309]"></div>
+              <span className="text-slate-600">Object</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 bg-[#334155]"></div>
+              <span className="text-slate-600">Location</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-0 h-0 border-l-[6px] border-r-[6px] border-b-[10.4px] border-l-transparent border-r-transparent border-b-[#0f172a]"></div>
+              <span className="text-slate-600">Faction</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="#64748b"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>
+              <span className="text-slate-600">Archetype</span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
