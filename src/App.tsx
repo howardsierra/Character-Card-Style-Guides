@@ -952,7 +952,7 @@ export default function App() {
       
       setForgeSlots(prev => {
         const newSlots = [...prev];
-        newSlots[index].value = generatedText;
+        newSlots[index] = { ...newSlots[index], value: generatedText };
         return newSlots;
       });
     } catch (err) {
@@ -1770,7 +1770,7 @@ export default function App() {
                               value={slot.value}
                               onChange={(e) => {
                                 const newSlots = [...forgeSlots];
-                                newSlots[index].value = e.target.value;
+                                newSlots[index] = { ...newSlots[index], value: e.target.value };
                                 setForgeSlots(newSlots);
                               }}
                               className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all min-h-[100px] resize-y"
