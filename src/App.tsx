@@ -159,6 +159,7 @@ export default function App() {
   const [isForging, setIsForging] = useState(false);
   const [isExtractingSlots, setIsExtractingSlots] = useState(false);
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
+  const [generatingSlotIndex, setGeneratingSlotIndex] = useState<number | null>(null);
   const [isAutoFilling, setIsAutoFilling] = useState(false);
   const [showSavedCards, setShowSavedCards] = useState(false);
   
@@ -920,6 +921,47 @@ export default function App() {
       handleSuggestArchetype();
     }
   }, [forgeSlots, forgeConcept, isSuggestingArchetype]);
+
+  const handleGenerateSlot = async (index: number) => {
+    if (!forgeSelectedGuide) {
+      alert("Please select a style guide first to generate slot content.");
+      return;
+    }
+    const guide = guides.find(g => g.id === forgeSelectedGuide);
+    if (!guide) return;
+
+    setGeneratingSlotIndex(index);
+    try {
+      const { generateSlotContent } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      
+      const slot = forgeSlots[index];
+      const otherSlots = forgeSlots.filter((_, i) => i !== index);
+      
+      const generatedText = await generateSlotContent(
+        currentProvider,
+        apiKeys,
+        slot.name,
+        slot.description,
+        forgeName,
+        forgeConcept,
+        otherSlots,
+        guide.content,
+        currentModel
+      );
+      
+      setForgeSlots(prev => {
+        const newSlots = [...prev];
+        newSlots[index].value = generatedText;
+        return newSlots;
+      });
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate slot content.");
+    } finally {
+      setGeneratingSlotIndex(null);
+    }
+  };
 
   const handleAutoFill = async () => {
     if (!forgeName || !forgeConcept) {
@@ -1705,10 +1747,23 @@ export default function App() {
                       ) : (
                         forgeSlots.map((slot, index) => (
                           <div key={index} className="space-y-2">
-                            <Label htmlFor={`slot-${index}`} className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
-                              {slot.name}
-                              <InfoTooltip text={slot.description} />
-                            </Label>
+                            <div className="flex items-center justify-between">
+                              <Label htmlFor={`slot-${index}`} className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                                {slot.name}
+                                <InfoTooltip text={slot.description} />
+                              </Label>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleGenerateSlot(index)}
+                                disabled={generatingSlotIndex === index || !forgeSelectedGuide}
+                                className="h-6 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-2"
+                                title={!forgeSelectedGuide ? "Select a style guide first" : "Auto-generate content for this field"}
+                              >
+                                {generatingSlotIndex === index ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
+                                Auto
+                              </Button>
+                            </div>
                             <Textarea 
                               id={`slot-${index}`}
                               placeholder={`Enter ${slot.name.toLowerCase()}...`} 

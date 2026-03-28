@@ -351,6 +351,51 @@ Example Messages: ${c.mes_example}
   return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 4000, model);
 }
 
+export async function generateSlotContent(
+  provider: AIProvider,
+  keys: ApiKeys,
+  slotName: string,
+  slotDescription: string,
+  characterName: string,
+  characterConcept: string,
+  otherSlots: { name: string; value: string }[],
+  styleGuide: string,
+  model?: string
+): Promise<string> {
+  const contextStr = otherSlots
+    .filter(s => s.value.trim() !== "")
+    .map(s => `${s.name}: ${s.value}`)
+    .join("\n");
+
+  let prompt = `You are an expert character creator for roleplay. Generate the content for a specific character detail field.
+
+CHARACTER CONTEXT:
+Name: ${characterName || "Unknown"}
+Concept/Archetype: ${characterConcept || "Unknown"}
+${contextStr ? `\nOTHER KNOWN DETAILS:\n${contextStr}\n` : ""}
+
+STYLE GUIDE:
+${styleGuide || "Use a descriptive, engaging tone."}
+
+TASK:
+Generate ONLY the content for the field "${slotName}".
+${slotDescription ? `Field Description/Hint: ${slotDescription}` : ""}
+
+Keep the response concise, directly applicable to the field, and written in the tone dictated by the Style Guide. Do not include the field name in your response. Return ONLY the raw generated text.`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character creator. Output only the requested field content.",
+    false,
+    1500,
+    model
+  );
+  
+  return responseText.trim();
+}
+
 export async function generateCharacterCard(
   provider: AIProvider,
   keys: ApiKeys,
