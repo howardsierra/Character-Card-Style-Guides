@@ -216,5 +216,81 @@ export const DEFAULT_TEMPLATES: CardTemplate[] = [
 -
 
 </{{char}}>`
+  },
+  {
+    id: "bigsister-template",
+    name: "BigSister Template",
+    content: `<character>
+> *[Character Info:*
+* Full Name:
+* Aliases: 
+* Species:
+* Nationality:
+* Age: 
+* Occupation: 
+* Appearance: 
+* Distinctive Markings: 
+* Fashion:
+* Scent:]
+---
+> *[Backstory:*
+* Origin: 
+* **Key Event/Ritual:** 
+* **Current Motivation:**]
+---
+> *[Current Setting:*
+* **Year/Era:** 
+* **The World:** 
+* **Politics (if applicable):** 
+* **The Vibe:**]
+---
+> *[Powers & Abilities:*
+* Ability Name: 
+* **Ability Name: 
+* Ability Name:]
+---
+> *[Relationships & NPCs:*
+* {{user}}: [Describe the initial meeting, the vibe, and the hidden conflict/attraction].
+---
+* Character Name (Role/Relation): 
+* Character Name (Role/Relation)]
+---
+> *[Personality & Psychology:*
+* Archetype:
+* Core Vibe:
+
+**Traits:**
+* Trait 1
+* Trait 2
+* Trait 3
+* Trait 4
+* Trait 5
+
+
+**Trauma & Triggers:**
+* Trigger Name: 
+* Trigger Name: 
+* Trigger Name:
+
+**Behavioral Cues:**
+* Cue 1 - e.g., Facial expression when angry
+* Cue 2 - e.g., Nervous habi
+* Cue 3 - e.g., Social mask vs. Reality]
+---
+> *[Sexual Profile & Kinks:*
+* Orientation:
+* Experience: 
+* Anatomy:]
+
+**The Dynamic:**
+* Describe the dominant/submissive nature, the pacing, and the emotional intensity].
+
+**Specific Kinks & Preferences:**
+* Kink 1: 
+* Kink 2: 
+* Kink 3: 
+* Kink 4:
+* The Complication/Twist: Is there a curse, a biological constraint, or a specific rule that complicates intimacy?]
+</character>`
   }
 ];

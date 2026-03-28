@@ -357,7 +357,8 @@ export async function generateCharacterCard(
   styleGuide: string,
   slots: { name: string; value: string }[],
   template?: string,
-  model?: string
+  model?: string,
+  firstMessageIdea?: string
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
   
@@ -366,6 +367,10 @@ export async function generateCharacterCard(
     prompt += `Using the following Style Guide for tone and prose, create a character card that STRICTLY adheres to the formatting and structural rules of the provided TEMPLATE.\n\nTEMPLATE:\n${template}\n\nSTYLE GUIDE:\n${styleGuide}\n`;
   } else {
     prompt += `Using the following Style Guide, create a character card that STRICTLY adheres to its formatting, tone, and structural rules.\n\nSTYLE GUIDE:\n${styleGuide}\n`;
+  }
+
+  if (firstMessageIdea) {
+    prompt += `\nFIRST MESSAGE / SCENARIO IDEA:\nThe user has provided the following idea for the character's first message and scenario. Use this as the core premise for the 'first_mes' and 'scenario' fields, writing it in the tone and prose dictated by the Style Guide:\n"${firstMessageIdea}"\n`;
   }
 
   prompt += `
@@ -761,23 +766,37 @@ ${characterDetails}`;
 export async function generateCharacterImage(
   keys: ApiKeys,
   prompt: string,
-  model: string = "gemini-3.1-flash-image-preview"
+  model: string = "gemini-3.1-flash-image-preview",
+  aspectRatio: string = "3:4",
+  imageSize: string = "1K",
+  style: string = ""
 ): Promise<string> {
   try {
     const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY || "dummy" });
+    
+    let finalPrompt = prompt;
+    if (style && style !== "None") {
+      finalPrompt = `${prompt}, ${style} style, highly detailed, masterpiece`;
+    }
+
+    const config: any = {
+      imageConfig: {
+        aspectRatio: aspectRatio,
+      }
+    };
+
+    if (model === "gemini-3.1-flash-image-preview") {
+      config.imageConfig.imageSize = imageSize;
+    }
+
     const response = await ai.models.generateContent({
       model: model,
       contents: {
         parts: [
-          { text: prompt },
+          { text: finalPrompt },
         ],
       },
-      config: {
-        imageConfig: {
-          aspectRatio: "3:4",
-          ...(model === "gemini-3.1-flash-image-preview" ? { imageSize: "1K" } : {})
-        }
-      }
+      config
     });
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {

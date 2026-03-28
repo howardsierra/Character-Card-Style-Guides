@@ -135,14 +135,17 @@ export default function App() {
   const [forgeState, setForgeState, forgeHistory] = useHistory({
     name: "",
     concept: "",
-    slots: [] as { name: string, description: string, value: string }[]
+    slots: [] as { name: string, description: string, value: string }[],
+    firstMessageIdea: ""
   });
   const forgeName = forgeState.name;
   const forgeConcept = forgeState.concept;
   const forgeSlots = forgeState.slots;
+  const forgeFirstMessageIdea = forgeState.firstMessageIdea || "";
   
   const setForgeName = (name: string) => setForgeState(prev => ({ ...prev, name }));
   const setForgeConcept = (concept: string) => setForgeState(prev => ({ ...prev, concept }));
+  const setForgeFirstMessageIdea = (firstMessageIdea: string) => setForgeState(prev => ({ ...prev, firstMessageIdea }));
   const setForgeSlots = (slots: { name: string, description: string, value: string }[] | ((prev: { name: string, description: string, value: string }[]) => { name: string, description: string, value: string }[])) => {
     setForgeState(prev => ({
       ...prev,
@@ -170,6 +173,9 @@ export default function App() {
   const [studioCharacterImage, setStudioCharacterImage] = useState("");
   const [isGeneratingStudioImage, setIsGeneratingStudioImage] = useState(false);
   const [studioSelectedCard, setStudioSelectedCard] = useState<string>("");
+  const [imageAspectRatio, setImageAspectRatio] = useState("3:4");
+  const [imageSize, setImageSize] = useState("1K");
+  const [imageStyle, setImageStyle] = useState("None");
 
   const [forgedCardState, setForgedCardState, forgedCardHistory] = useHistory<CharacterCard | null>(null);
   const forgedCard = forgedCardState;
@@ -202,6 +208,7 @@ export default function App() {
         if (draft.forgeSlots) setForgeSlots(draft.forgeSlots);
         if (draft.forgeSelectedGuide) setForgeSelectedGuide(draft.forgeSelectedGuide);
         if (draft.forgeSelectedTemplate) setForgeSelectedTemplate(draft.forgeSelectedTemplate);
+        if (draft.forgeFirstMessageIdea) setForgeFirstMessageIdea(draft.forgeFirstMessageIdea);
       } catch (e) {
         console.error("Failed to load draft", e);
       }
@@ -259,10 +266,11 @@ export default function App() {
       forgeConcept,
       forgeSlots,
       forgeSelectedGuide,
-      forgeSelectedTemplate
+      forgeSelectedTemplate,
+      forgeFirstMessageIdea
     };
     localStorage.setItem("st_forge_draft", JSON.stringify(draft));
-  }, [forgeName, forgeConcept, forgeSlots, forgeSelectedGuide, forgeSelectedTemplate]);
+  }, [forgeName, forgeConcept, forgeSlots, forgeSelectedGuide, forgeSelectedTemplate, forgeFirstMessageIdea]);
 
   const prevKeysRef = useRef<ApiKeys>(apiKeys);
   const prevProviderRef = useRef<AIProvider>(provider);
@@ -760,7 +768,8 @@ export default function App() {
         guide.content,
         allSlots,
         template,
-        currentModel
+        currentModel,
+        forgeFirstMessageIdea
       );
       setForgedCard(result);
     } catch (err) {
@@ -807,7 +816,7 @@ export default function App() {
         modelToUse = "gemini-3.1-flash-image-preview";
       }
 
-      const imageBase64 = await generateCharacterImage(apiKeys, imagePrompt, modelToUse);
+      const imageBase64 = await generateCharacterImage(apiKeys, imagePrompt, modelToUse, imageAspectRatio, imageSize, imageStyle);
       setCharacterImage(imageBase64);
     } catch (err) {
       console.error(err);
@@ -858,7 +867,7 @@ export default function App() {
         modelToUse = "gemini-3.1-flash-image-preview";
       }
 
-      const imageBase64 = await generateCharacterImage(apiKeys, studioImagePrompt, modelToUse);
+      const imageBase64 = await generateCharacterImage(apiKeys, studioImagePrompt, modelToUse, imageAspectRatio, imageSize, imageStyle);
       setStudioCharacterImage(imageBase64);
     } catch (err) {
       console.error(err);
@@ -1715,6 +1724,22 @@ export default function App() {
                         ))
                       )}
 
+                      {(!isExtractingSlots && forgeSlots.length > 0) && (
+                        <div className="space-y-2 mt-4 pt-4 border-t border-[#e5e4e2]">
+                          <Label htmlFor="first-message-idea" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                            First Message / Scenario Idea
+                            <InfoTooltip text="Provide a general idea or scenario for the character's first message. The AI will use this to generate the 'first_mes' and 'scenario' fields." />
+                          </Label>
+                          <Textarea 
+                            id="first-message-idea"
+                            placeholder="e.g., The character meets the user in a dark alleyway..." 
+                            value={forgeFirstMessageIdea}
+                            onChange={(e) => setForgeFirstMessageIdea(e.target.value)}
+                            className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all min-h-[100px] resize-y"
+                          />
+                        </div>
+                      )}
+
                       <div className="flex flex-col gap-2 mt-4">
                         <div className="flex justify-end">
                           <ModelSelector
@@ -1847,17 +1872,84 @@ export default function App() {
                                       Generate Image
                                     </Button>
                                   </div>
+                                  <div className="grid grid-cols-3 gap-2 mt-2">
+                                    <div className="space-y-1">
+                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Aspect Ratio</Label>
+                                      <select
+                                        value={imageAspectRatio}
+                                        onChange={(e) => setImageAspectRatio(e.target.value)}
+                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
+                                      >
+                                        <option value="1:1">1:1</option>
+                                        <option value="3:4">3:4</option>
+                                        <option value="4:3">4:3</option>
+                                        <option value="9:16">9:16</option>
+                                        <option value="16:9">16:9</option>
+                                      </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Size</Label>
+                                      <select
+                                        value={imageSize}
+                                        onChange={(e) => setImageSize(e.target.value)}
+                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
+                                      >
+                                        <option value="512px">512px</option>
+                                        <option value="1K">1K</option>
+                                        <option value="2K">2K</option>
+                                        <option value="4K">4K</option>
+                                      </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Style</Label>
+                                      <select
+                                        value={imageStyle}
+                                        onChange={(e) => setImageStyle(e.target.value)}
+                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
+                                      >
+                                        <option value="None">None</option>
+                                        <option value="Photorealistic">Photoreal</option>
+                                        <option value="Anime / Manga">Anime</option>
+                                        <option value="Digital Art">Digital</option>
+                                        <option value="Oil Painting">Oil</option>
+                                        <option value="Dark Fantasy">Fantasy</option>
+                                        <option value="Cyberpunk">Cyberpunk</option>
+                                        <option value="Watercolor">Watercolor</option>
+                                        <option value="Comic Book">Comic</option>
+                                      </select>
+                                    </div>
+                                  </div>
                                 </div>
                                 
                                 <div className="w-full md:w-40 shrink-0 flex flex-col items-center justify-center">
-                                  <div className="w-32 h-40 md:w-full md:h-48 bg-white border border-slate-200 rounded-xl overflow-hidden flex items-center justify-center relative shadow-sm">
+                                  <div className="w-32 h-40 md:w-full md:h-48 bg-white border border-slate-200 rounded-xl overflow-hidden flex items-center justify-center relative shadow-sm group">
                                     {isGeneratingImage ? (
                                       <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm z-10">
                                         <Loader2 className="w-6 h-6 text-[#8B3A3A] animate-spin mb-2" />
                                         <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Generating</span>
                                       </div>
                                     ) : characterImage ? (
-                                      <img src={characterImage} alt="Character Portrait" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                      <>
+                                        <img src={characterImage} alt="Character Portrait" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                          <Button
+                                            onClick={() => {
+                                              const a = document.createElement("a");
+                                              a.href = characterImage;
+                                              a.download = `portrait_${forgedCard.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || Date.now()}.png`;
+                                              document.body.appendChild(a);
+                                              a.click();
+                                              document.body.removeChild(a);
+                                            }}
+                                            variant="secondary"
+                                            size="sm"
+                                            className="rounded-full text-xs"
+                                          >
+                                            <Download className="w-3 h-3 mr-1" />
+                                            Download
+                                          </Button>
+                                        </div>
+                                      </>
                                     ) : (
                                       <ImageIcon className="w-8 h-8 text-slate-300" />
                                     )}
@@ -2056,6 +2148,54 @@ export default function App() {
                         </div>
                       </div>
 
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold tracking-widest text-slate-400 uppercase">Aspect Ratio</Label>
+                          <select
+                            value={imageAspectRatio}
+                            onChange={(e) => setImageAspectRatio(e.target.value)}
+                            className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
+                          >
+                            <option value="1:1">1:1 (Square)</option>
+                            <option value="3:4">3:4 (Portrait)</option>
+                            <option value="4:3">4:3 (Landscape)</option>
+                            <option value="9:16">9:16 (Vertical)</option>
+                            <option value="16:9">16:9 (Widescreen)</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold tracking-widest text-slate-400 uppercase">Image Size</Label>
+                          <select
+                            value={imageSize}
+                            onChange={(e) => setImageSize(e.target.value)}
+                            className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
+                          >
+                            <option value="512px">512px</option>
+                            <option value="1K">1K</option>
+                            <option value="2K">2K</option>
+                            <option value="4K">4K</option>
+                          </select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs font-bold tracking-widest text-slate-400 uppercase">Art Style</Label>
+                          <select
+                            value={imageStyle}
+                            onChange={(e) => setImageStyle(e.target.value)}
+                            className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
+                          >
+                            <option value="None">None (Prompt Only)</option>
+                            <option value="Photorealistic">Photorealistic</option>
+                            <option value="Anime / Manga">Anime / Manga</option>
+                            <option value="Digital Art">Digital Art</option>
+                            <option value="Oil Painting">Oil Painting</option>
+                            <option value="Dark Fantasy">Dark Fantasy</option>
+                            <option value="Cyberpunk">Cyberpunk</option>
+                            <option value="Watercolor">Watercolor</option>
+                            <option value="Comic Book">Comic Book</option>
+                          </select>
+                        </div>
+                      </div>
+
                       <div className="mt-8 pt-6 border-t border-[#e5e4e2]">
                         <Button 
                           onClick={handleGenerateStudioImage}
@@ -2082,16 +2222,35 @@ export default function App() {
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
                         <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Generated Portrait</h3>
-                        {studioCharacterImage && studioSelectedCard && (
-                          <Button 
-                            onClick={handleSaveStudioImage}
-                            variant="outline"
-                            className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
-                          >
-                            <Save className="w-4 h-4 mr-2" />
-                            Save to Character
-                          </Button>
-                        )}
+                        <div className="flex items-center gap-2">
+                          {studioCharacterImage && (
+                            <Button 
+                              onClick={() => {
+                                const a = document.createElement("a");
+                                a.href = studioCharacterImage;
+                                a.download = `portrait_${Date.now()}.png`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                              }}
+                              variant="outline"
+                              className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                            >
+                              <Download className="w-4 h-4 mr-2" />
+                              Download
+                            </Button>
+                          )}
+                          {studioCharacterImage && studioSelectedCard && (
+                            <Button 
+                              onClick={handleSaveStudioImage}
+                              variant="outline"
+                              className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                            >
+                              <Save className="w-4 h-4 mr-2" />
+                              Save to Character
+                            </Button>
+                          )}
+                        </div>
                       </div>
 
                       <div className="flex-1 flex items-center justify-center bg-[#f9f8f6] border border-[#e5e4e2] rounded-2xl overflow-hidden relative min-h-[400px]">
