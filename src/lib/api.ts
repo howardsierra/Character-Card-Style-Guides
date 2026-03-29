@@ -206,6 +206,7 @@ async function callAIProvider(
       case "gemini": {
         const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
         const config: any = {
+          maxOutputTokens: maxTokens,
           systemInstruction: systemPrompt,
         };
         if (jsonMode) {
@@ -245,6 +246,7 @@ async function callAIProvider(
       case "openai": {
         const body: any = {
           model: model || "gpt-4-turbo-preview",
+          max_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt }
@@ -272,6 +274,7 @@ async function callAIProvider(
       case "openrouter": {
         const body: any = {
           model: model || "anthropic/claude-3-opus",
+          max_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt }
@@ -301,6 +304,7 @@ async function callAIProvider(
       case "custom": {
         const body: any = {
           model: model || "default",
+          max_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt }
@@ -348,7 +352,7 @@ Example Messages: ${c.mes_example}
 
   const prompt = `Here are the character cards to analyze:\n\n${cardsData}\n\nPlease generate the comprehensive style guide based on these cards.`;
 
-  return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 4000, model);
+  return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 16000, model);
 }
 
 export async function generateSlotContent(
@@ -853,7 +857,7 @@ export async function mergeStyleGuides(
   const guidesData = guides.map((g, i) => `--- Guide ${i + 1} ---\n${g}`).join("\n\n");
   const prompt = `Here are multiple style guides:\n\n${guidesData}\n\nPlease merge them into a single, cohesive, comprehensive style guide that combines the insights, patterns, and formatting rules from all of them. Maintain the same 14-section structure as requested before. Ensure the final output is well-organized and eliminates redundancies while preserving unique details from each guide.`;
 
-  return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 4000, model);
+  return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 16000, model);
 }
 
 export async function generateImagePrompt(
