@@ -667,7 +667,7 @@ export default function App() {
       if (template) {
         import("./lib/api").then(({ extractSlotsFromTemplate }) => {
           const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
-          extractSlotsFromTemplate(currentProvider, apiKeys, template.content, currentModel).then(slots => {
+          extractSlotsFromTemplate(currentProvider, apiKeys, template.content, currentModel, template.example).then(slots => {
             setForgeSlots(prev => {
               return slots.map(s => {
                 const existing = prev.find(p => p.name === s.name);
