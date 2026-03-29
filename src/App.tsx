@@ -761,7 +761,10 @@ export default function App() {
         ...forgeSlots
       ];
 
-      const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate)?.content;
+      const templateObj = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
+      const template = templateObj?.content;
+      const templateExample = templateObj?.example;
+      
       const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
       const result = await generateCharacterCard(
         currentProvider,
@@ -770,7 +773,8 @@ export default function App() {
         allSlots,
         template,
         currentModel,
-        forgeFirstMessageIdea
+        forgeFirstMessageIdea,
+        templateExample
       );
       setForgedCard(result);
     } catch (err) {
@@ -938,6 +942,9 @@ export default function App() {
       const slot = forgeSlots[index];
       const otherSlots = forgeSlots.filter((_, i) => i !== index);
       
+      const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
+      const templateExample = template?.example;
+
       const generatedText = await generateSlotContent(
         currentProvider,
         apiKeys,
@@ -948,7 +955,8 @@ export default function App() {
         forgeConcept,
         otherSlots,
         guide.content,
-        currentModel
+        currentModel,
+        templateExample
       );
       
       setForgeSlots(prev => {
@@ -973,7 +981,10 @@ export default function App() {
     try {
       const { autoFillSlots } = await import("./lib/api");
       const { currentProvider, currentModel } = getProviderAndModel("forge_autofill");
-      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel);
+      const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
+      const templateExample = template?.example;
+
+      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel, templateExample);
       setForgeSlots(prev => prev.map(slot => {
         if (filledData[slot.name]) {
           return { ...slot, value: filledData[slot.name] };

@@ -361,7 +361,8 @@ export async function generateSlotContent(
   characterConcept: string,
   otherSlots: { name: string; value: string }[],
   styleGuide: string,
-  model?: string
+  model?: string,
+  templateExample?: string
 ): Promise<string> {
   const contextStr = otherSlots
     .filter(s => s.value.trim() !== "")
@@ -383,6 +384,7 @@ ${currentValue.trim() !== ""
   ? `Refine, expand upon, or complete the following existing content for the field "${slotName}":\n\nEXISTING CONTENT:\n${currentValue}\n\nMake sure the final output incorporates the existing ideas but improves them according to the Style Guide.` 
   : `Generate ONLY the content for the field "${slotName}".`}
 ${slotDescription ? `\nField Description/Hint: ${slotDescription}` : ""}
+${templateExample ? `\nEXAMPLE OF FILLED TEMPLATE (Use this as a strict reference for formatting, tone, length, and level of detail for this field):\n${templateExample}` : ""}
 
 Keep the response concise, directly applicable to the field, and written in the tone dictated by the Style Guide. Do not include the field name in your response. Return ONLY the raw generated text.`;
 
@@ -406,13 +408,18 @@ export async function generateCharacterCard(
   slots: { name: string; value: string }[],
   template?: string,
   model?: string,
-  firstMessageIdea?: string
+  firstMessageIdea?: string,
+  templateExample?: string
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
   
   let prompt = `You are an expert character creator for roleplay.\n`;
   if (template) {
-    prompt += `Using the following Style Guide for tone and prose, create a character card that STRICTLY adheres to the formatting and structural rules of the provided TEMPLATE.\n\nTEMPLATE:\n${template}\n\nSTYLE GUIDE:\n${styleGuide}\n`;
+    prompt += `Using the following Style Guide for tone and prose, create a character card that STRICTLY adheres to the formatting and structural rules of the provided TEMPLATE.\n\nTEMPLATE:\n${template}\n`;
+    if (templateExample) {
+      prompt += `\nEXAMPLE OF FILLED TEMPLATE (Use this as a strict reference for formatting, tone, length, and level of detail):\n${templateExample}\n`;
+    }
+    prompt += `\nSTYLE GUIDE:\n${styleGuide}\n`;
   } else {
     prompt += `Using the following Style Guide, create a character card that STRICTLY adheres to its formatting, tone, and structural rules.\n\nSTYLE GUIDE:\n${styleGuide}\n`;
   }
@@ -802,20 +809,25 @@ export async function autoFillSlots(
   name: string,
   concept: string,
   slots: { name: string; description: string; value: string }[],
-  model?: string
+  model?: string,
+  templateExample?: string
 ): Promise<Record<string, string>> {
   const emptySlots = slots.filter(s => !s.value.trim());
   if (emptySlots.length === 0) return {};
 
   const slotsPrompt = emptySlots.map(s => `- ${s.name}: ${s.description}`).join("\n");
 
-  const prompt = `You are an expert character creator. I am building a character named "${name}" with the core concept/archetype of "${concept}".
+  let prompt = `You are an expert character creator. I am building a character named "${name}" with the core concept/archetype of "${concept}".
   
 Please generate appropriate content for the following character fields.
 Return ONLY a JSON object where the keys are the exact field names and the values are the generated content.
 
 FIELDS TO FILL:
 ${slotsPrompt}`;
+
+  if (templateExample) {
+    prompt += `\n\nEXAMPLE OF FILLED TEMPLATE (Use this as a strict reference for formatting, tone, length, and level of detail for these fields):\n${templateExample}`;
+  }
 
   const responseText = await callAIProvider(
     provider,
