@@ -52,8 +52,7 @@ RESIDENCE
 * Primary: 
 * Secondary: 
 CONNECTIONS:
-* {{USER}}: 
-* 
+* Connections:
 SPEECH
 * Style: 
 SPEECH EXAMPLES
@@ -202,19 +201,12 @@ THE BLACKMAIL SITUATION
 - 
 
 > CONNECTIONS
-- {{user}}: 
-- 
-- 
+- Connections:
 
 > PERSONALITY
 - Archetype: 
 - Tags: 
 - Core Traits:
-   - Adjective: Description for the llm to portray said trait
-   - 
-   - 
-   - 
-   - 
 
 > PSYCHOLOGICAL CORE
 - Core Belief: Quote. What belief does this character go by? 
@@ -254,9 +246,9 @@ THE BLACKMAIL SITUATION
 
 > SEXUAL PREFERENCES
 - Role: Dominant/Switch/Submissive (situational / default / flexible)
-- Style: rough, verbal, controlling etc.
-- Likes: X, Y, Z
-- Dislikes: X
+- Sexual Style: rough, verbal, controlling etc.
+- Sexual Likes: X, Y, Z
+- Sexual Dislikes: X
 - Boundaries: X
 - Aftercare: brief description
 
@@ -393,37 +385,21 @@ AI GUIDANCE
 * **The Vibe:**]
 ---
 > *[Powers & Abilities:*
-* Ability Name: 
-* **Ability Name: 
-* Ability Name:]
+* Powers & Abilities:]
 ---
 > *[Relationships & NPCs:*
-* {{user}}: [Describe the initial meeting, the vibe, and the hidden conflict/attraction].
----
-* Character Name (Role/Relation): 
-* Character Name (Role/Relation)]
+* Relationships:]
 ---
 > *[Personality & Psychology:*
 * Archetype:
 * Core Vibe:
 
-**Traits:**
-* Trait 1
-* Trait 2
-* Trait 3
-* Trait 4
-* Trait 5
+* Traits:
 
 
-**Trauma & Triggers:**
-* Trigger Name: 
-* Trigger Name: 
-* Trigger Name:
+* Trauma & Triggers:
 
-**Behavioral Cues:**
-* Cue 1 - e.g., Facial expression when angry
-* Cue 2 - e.g., Nervous habi
-* Cue 3 - e.g., Social mask vs. Reality]
+* Behavioral Cues:]
 ---
 > *[Sexual Profile & Kinks:*
 * Orientation:
@@ -433,12 +409,8 @@ AI GUIDANCE
 **The Dynamic:**
 * Describe the dominant/submissive nature, the pacing, and the emotional intensity].
 
-**Specific Kinks & Preferences:**
-* Kink 1: 
-* Kink 2: 
-* Kink 3: 
-* Kink 4:
-* The Complication/Twist: Is there a curse, a biological constraint, or a specific rule that complicates intimacy?]
+* Kinks:
+* The Complication/Twist:]
 </character>`,
     example: `<charactername>
 [Character Info:
@@ -544,8 +516,7 @@ Kinks:
 * Speech Style:
 * ]
 [Relationships:
-* {{user}}:
-* ]
+* Relationships: ]
 [Sexual Behavior:
 * Genitalia:
 * Kinks:

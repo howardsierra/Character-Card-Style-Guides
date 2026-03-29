@@ -685,16 +685,14 @@ export default function App() {
       const guide = guides.find(g => g.id === forgeSelectedGuide);
       if (guide) {
         import("./lib/api").then(({ extractSlotsFromGuide }) => {
-          const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
-          extractSlotsFromGuide(currentProvider, apiKeys, guide.content, currentModel).then(slots => {
-            setForgeSlots(prev => {
-              return slots.map(s => {
-                const existing = prev.find(p => p.name === s.name);
-                return { ...s, value: existing ? existing.value : "" };
-              });
+          const slots = extractSlotsFromGuide();
+          setForgeSlots(prev => {
+            return slots.map(s => {
+              const existing = prev.find(p => p.name === s.name);
+              return { ...s, value: existing ? existing.value : "" };
             });
-            setIsExtractingSlots(false);
           });
+          setIsExtractingSlots(false);
         });
       } else {
         setIsExtractingSlots(false);
@@ -984,7 +982,8 @@ export default function App() {
       const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
       const templateExample = template?.example;
 
-      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel, templateExample);
+      const guide = guides.find(g => g.id === forgeSelectedGuide);
+      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel, templateExample, guide?.content);
       setForgeSlots(prev => prev.map(slot => {
         if (filledData[slot.name]) {
           return { ...slot, value: filledData[slot.name] };
