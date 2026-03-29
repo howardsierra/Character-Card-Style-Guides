@@ -356,6 +356,7 @@ export async function generateSlotContent(
   keys: ApiKeys,
   slotName: string,
   slotDescription: string,
+  currentValue: string,
   characterName: string,
   characterConcept: string,
   otherSlots: { name: string; value: string }[],
@@ -367,7 +368,7 @@ export async function generateSlotContent(
     .map(s => `${s.name}: ${s.value}`)
     .join("\n");
 
-  let prompt = `You are an expert character creator for roleplay. Generate the content for a specific character detail field.
+  let prompt = `You are an expert character creator for roleplay. Generate or refine the content for a specific character detail field.
 
 CHARACTER CONTEXT:
 Name: ${characterName || "Unknown"}
@@ -378,8 +379,10 @@ STYLE GUIDE:
 ${styleGuide || "Use a descriptive, engaging tone."}
 
 TASK:
-Generate ONLY the content for the field "${slotName}".
-${slotDescription ? `Field Description/Hint: ${slotDescription}` : ""}
+${currentValue.trim() !== "" 
+  ? `Refine, expand upon, or complete the following existing content for the field "${slotName}":\n\nEXISTING CONTENT:\n${currentValue}\n\nMake sure the final output incorporates the existing ideas but improves them according to the Style Guide.` 
+  : `Generate ONLY the content for the field "${slotName}".`}
+${slotDescription ? `\nField Description/Hint: ${slotDescription}` : ""}
 
 Keep the response concise, directly applicable to the field, and written in the tone dictated by the Style Guide. Do not include the field name in your response. Return ONLY the raw generated text.`;
 

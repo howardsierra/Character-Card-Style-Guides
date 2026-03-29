@@ -943,6 +943,7 @@ export default function App() {
         apiKeys,
         slot.name,
         slot.description,
+        slot.value,
         forgeName,
         forgeConcept,
         otherSlots,
