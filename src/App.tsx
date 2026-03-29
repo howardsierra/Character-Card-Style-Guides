@@ -20,6 +20,7 @@ import { ModelSelector } from "./components/ModelSelector";
 import { useHistory } from "./hooks/useHistory";
 
 type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "image" | "settings";
+const APP_AUTOSAVE_KEY = "st_app_autosave_v1";
 
 interface GuideVersion {
   id: string;
@@ -182,6 +183,7 @@ export default function App() {
   const forgedCard = forgedCardState;
   const setForgedCard = setForgedCardState;
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
+  const [hasHydratedAutosave, setHasHydratedAutosave] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const guideRef = useRef<HTMLDivElement>(null);
@@ -237,6 +239,40 @@ export default function App() {
     if (savedCardsData) {
       setSavedCards(JSON.parse(savedCardsData));
     }
+
+    const savedAppState = localStorage.getItem(APP_AUTOSAVE_KEY);
+    if (savedAppState) {
+      try {
+        const parsed = JSON.parse(savedAppState);
+        if (parsed.view) setView(parsed.view);
+        if (Array.isArray(parsed.cards)) setCards(parsed.cards);
+        if (typeof parsed.currentGuide === "string" || parsed.currentGuide === null) setCurrentGuide(parsed.currentGuide);
+        if (typeof parsed.currentGuideId === "string" || parsed.currentGuideId === null) setCurrentGuideId(parsed.currentGuideId);
+        if (typeof parsed.isEditingGuide === "boolean") setIsEditingGuide(parsed.isEditingGuide);
+        if (typeof parsed.editedGuideContent === "string") setEditedGuideContent(parsed.editedGuideContent);
+        if (typeof parsed.showVersions === "boolean") setShowVersions(parsed.showVersions);
+        if (Array.isArray(parsed.selectedGuides)) setSelectedGuides(new Set(parsed.selectedGuides));
+
+        if (parsed.universeData) setUniverseData(parsed.universeData);
+        if (typeof parsed.universeSelectedGuide === "string") setUniverseSelectedGuide(parsed.universeSelectedGuide);
+        if (Array.isArray(parsed.universeSelectedCards)) setUniverseSelectedCards(new Set(parsed.universeSelectedCards));
+
+        if (typeof parsed.showSavedCards === "boolean") setShowSavedCards(parsed.showSavedCards);
+        if (typeof parsed.imagePrompt === "string") setImagePrompt(parsed.imagePrompt);
+        if (typeof parsed.characterImage === "string") setCharacterImage(parsed.characterImage);
+        if (typeof parsed.studioImagePrompt === "string") setStudioImagePrompt(parsed.studioImagePrompt);
+        if (typeof parsed.studioCharacterImage === "string") setStudioCharacterImage(parsed.studioCharacterImage);
+        if (typeof parsed.studioSelectedCard === "string") setStudioSelectedCard(parsed.studioSelectedCard);
+        if (typeof parsed.imageAspectRatio === "string") setImageAspectRatio(parsed.imageAspectRatio);
+        if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
+        if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
+        if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
+      } catch (e) {
+        console.error("Failed to load app autosave", e);
+      }
+    }
+
+    setHasHydratedAutosave(true);
   }, []);
 
   // Save keys
@@ -272,6 +308,84 @@ export default function App() {
     };
     localStorage.setItem("st_forge_draft", JSON.stringify(draft));
   }, [forgeName, forgeConcept, forgeSlots, forgeSelectedGuide, forgeSelectedTemplate, forgeFirstMessageIdea]);
+
+  useEffect(() => {
+    if (!hasHydratedAutosave) return;
+    const appState = {
+      view,
+      cards,
+      currentGuide,
+      currentGuideId,
+      isEditingGuide,
+      editedGuideContent,
+      showVersions,
+      selectedGuides: Array.from(selectedGuides),
+      universeData,
+      universeSelectedGuide,
+      universeSelectedCards: Array.from(universeSelectedCards),
+      showSavedCards,
+      imagePrompt,
+      characterImage,
+      studioImagePrompt,
+      studioCharacterImage,
+      studioSelectedCard,
+      imageAspectRatio,
+      imageSize,
+      imageStyle,
+      forgedCard
+    };
+
+    const writeAutosave = (payload: typeof appState) => {
+      localStorage.setItem(APP_AUTOSAVE_KEY, JSON.stringify(payload));
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      try {
+        writeAutosave(appState);
+      } catch (error) {
+        console.warn("Autosave exceeded storage quota. Retrying with trimmed image fields.", error);
+
+        const trimmedState = {
+          ...appState,
+          characterImage: "",
+          studioCharacterImage: "",
+          cards: appState.cards.map(card => ({ ...card, image: undefined })),
+          forgedCard: appState.forgedCard ? { ...appState.forgedCard, image: undefined } : appState.forgedCard
+        };
+
+        try {
+          writeAutosave(trimmedState);
+        } catch (trimmedError) {
+          console.error("Autosave failed even after trimming large fields.", trimmedError);
+        }
+      }
+    }, 400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [
+    hasHydratedAutosave,
+    view,
+    cards,
+    currentGuide,
+    currentGuideId,
+    isEditingGuide,
+    editedGuideContent,
+    showVersions,
+    selectedGuides,
+    universeData,
+    universeSelectedGuide,
+    universeSelectedCards,
+    showSavedCards,
+    imagePrompt,
+    characterImage,
+    studioImagePrompt,
+    studioCharacterImage,
+    studioSelectedCard,
+    imageAspectRatio,
+    imageSize,
+    imageStyle,
+    forgedCard
+  ]);
 
   const prevKeysRef = useRef<ApiKeys>(apiKeys);
   const prevProviderRef = useRef<AIProvider>(provider);
