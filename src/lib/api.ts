@@ -247,6 +247,7 @@ async function callAIProvider(
         const body: any = {
           model: model || "gpt-4-turbo-preview",
           max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt }
@@ -269,12 +270,17 @@ async function callAIProvider(
           throw new Error(`OpenAI API error: ${errMsg}`);
         }
         const data = await res.json();
-        return data.choices[0].message.content;
+        const choice = data.choices?.[0];
+        if (!choice) {
+          throw new Error(`OpenAI returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        }
+        return choice.message?.content || choice.text || "";
       }
       case "openrouter": {
         const body: any = {
           model: model || "anthropic/claude-3-opus",
           max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt }
@@ -299,7 +305,11 @@ async function callAIProvider(
           throw new Error(`OpenRouter API error: ${errMsg}`);
         }
         const data = await res.json();
-        return data.choices[0].message.content;
+        const choice = data.choices?.[0];
+        if (!choice) {
+          throw new Error(`OpenRouter returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        }
+        return choice.message?.content || choice.text || "";
       }
       case "custom": {
         const body: any = {
