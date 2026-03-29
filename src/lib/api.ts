@@ -318,22 +318,13 @@ async function callAIProvider(
         return choice.message?.content || choice.text || "";
       }
       case "custom": {
-        const capabilityKey = `${keys.customEndpoint}::${model || "default"}`;
-        const cachedSupport = customMaxCompletionSupport.get(capabilityKey);
-
-        const createBody = (includeMaxCompletionTokens: boolean) => {
-          const body: any = {
-            model: model || "default",
-            max_tokens: maxTokens,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: prompt }
-            ],
-          };
-          if (includeMaxCompletionTokens) {
-            body.max_completion_tokens = maxTokens;
-          }
-          return body;
+        const body: any = {
+          model: model || "default",
+          max_completion_tokens: maxTokens,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: prompt }
+          ],
         };
 
         const sendRequest = async (includeMaxCompletionTokens: boolean) => {

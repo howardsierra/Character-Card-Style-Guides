@@ -182,6 +182,7 @@ export default function App() {
   const [forgedCardState, setForgedCardState, forgedCardHistory] = useHistory<CharacterCard | null>(null);
   const forgedCard = forgedCardState;
   const setForgedCard = setForgedCardState;
+  const [forgeBaseCard, setForgeBaseCard] = useState<CharacterCard | null>(null);
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
   const [hasHydratedAutosave, setHasHydratedAutosave] = useState(false);
 
@@ -332,36 +333,10 @@ export default function App() {
       imageAspectRatio,
       imageSize,
       imageStyle,
-      forgedCard
+      forgedCard,
+      forgeBaseCard
     };
-
-    const writeAutosave = (payload: typeof appState) => {
-      localStorage.setItem(APP_AUTOSAVE_KEY, JSON.stringify(payload));
-    };
-
-    const timeoutId = window.setTimeout(() => {
-      try {
-        writeAutosave(appState);
-      } catch (error) {
-        console.warn("Autosave exceeded storage quota. Retrying with trimmed image fields.", error);
-
-        const trimmedState = {
-          ...appState,
-          characterImage: "",
-          studioCharacterImage: "",
-          cards: appState.cards.map(card => ({ ...card, image: undefined })),
-          forgedCard: appState.forgedCard ? { ...appState.forgedCard, image: undefined } : appState.forgedCard
-        };
-
-        try {
-          writeAutosave(trimmedState);
-        } catch (trimmedError) {
-          console.error("Autosave failed even after trimming large fields.", trimmedError);
-        }
-      }
-    }, 400);
-
-    return () => window.clearTimeout(timeoutId);
+    localStorage.setItem(APP_AUTOSAVE_KEY, JSON.stringify(appState));
   }, [
     hasHydratedAutosave,
     view,
@@ -384,7 +359,8 @@ export default function App() {
     imageAspectRatio,
     imageSize,
     imageStyle,
-    forgedCard
+    forgedCard,
+    forgeBaseCard
   ]);
 
   const prevKeysRef = useRef<ApiKeys>(apiKeys);
@@ -558,6 +534,64 @@ export default function App() {
     };
     reader.readAsText(file);
     e.target.value = "";
+  };
+
+  const normalizeSlotName = (name: string) =>
+    name.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+  const buildCardFieldMap = (card: CharacterCard): Record<string, string> => ({
+    name: card.name || "",
+    charactername: card.name || "",
+    concept: card.personality || "",
+    coreconcept: card.personality || "",
+    archetype: card.personality || "",
+    coreconceptarchetype: card.personality || "",
+    description: card.description || "",
+    personality: card.personality || "",
+    scenario: card.scenario || "",
+    firstmes: card.first_mes || "",
+    firstmessage: card.first_mes || "",
+    firstmessageideascenario: card.first_mes || card.scenario || "",
+    examplmessages: card.mes_example || "",
+    examplemessages: card.mes_example || "",
+    mesexample: card.mes_example || "",
+    creatornotes: card.creator_notes || "",
+    systemprompt: card.system_prompt || "",
+    posthistoryinstructions: card.post_history_instructions || "",
+  });
+
+  const applyCardToSlots = (slots: { name: string; description: string; value: string }[], card: CharacterCard) => {
+    const cardFieldMap = buildCardFieldMap(card);
+    return slots.map(slot => {
+      const normalized = normalizeSlotName(slot.name);
+      const mappedValue = cardFieldMap[normalized];
+      if (!slot.value?.trim() && mappedValue) {
+        return { ...slot, value: mappedValue };
+      }
+      return slot;
+    });
+  };
+
+  const handleForgeCardUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const uploadedCard = await parseFile(file);
+      setForgeBaseCard(uploadedCard);
+      setForgeName(uploadedCard.name || "");
+      setForgeConcept(uploadedCard.personality || "");
+      setForgeFirstMessageIdea(uploadedCard.first_mes || uploadedCard.scenario || "");
+      setForgedCard(uploadedCard);
+      setForgeSlots(prev => applyCardToSlots(prev, uploadedCard));
+      setView("create");
+      alert("Base card loaded into Card Forge. Choose a style guide/template and use AI tools to alternate it.");
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
+    } finally {
+      e.target.value = "";
+    }
   };
 
   const exportCardJson = (card: CharacterCard) => {
@@ -783,10 +817,11 @@ export default function App() {
           const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
           extractSlotsFromTemplate(currentProvider, apiKeys, template.content, currentModel, template.example).then(slots => {
             setForgeSlots(prev => {
-              return slots.map(s => {
+              const merged = slots.map(s => {
                 const existing = prev.find(p => p.name === s.name);
                 return { ...s, value: existing ? existing.value : "" };
               });
+              return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
             });
             setIsExtractingSlots(false);
           });
@@ -801,10 +836,11 @@ export default function App() {
         import("./lib/api").then(({ extractSlotsFromGuide }) => {
           const slots = extractSlotsFromGuide();
           setForgeSlots(prev => {
-            return slots.map(s => {
+            const merged = slots.map(s => {
               const existing = prev.find(p => p.name === s.name);
               return { ...s, value: existing ? existing.value : "" };
             });
+            return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
           });
           setIsExtractingSlots(false);
         });
@@ -814,7 +850,7 @@ export default function App() {
     } else {
       setIsExtractingSlots(false);
     }
-  }, [forgeSelectedGuide, forgeSelectedTemplate, provider, apiKeys, guides, customTemplates]);
+  }, [forgeSelectedGuide, forgeSelectedTemplate, provider, apiKeys, guides, customTemplates, forgeBaseCard]);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -1697,6 +1733,23 @@ export default function App() {
                           <Button
                             variant="outline"
                             size="sm"
+                            onClick={() => document.getElementById('forge-card-upload')?.click()}
+                            className="h-8 px-3 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            title="Upload an existing character card"
+                          >
+                            <Upload className="w-4 h-4 mr-1" />
+                            Upload Card
+                          </Button>
+                          <input
+                            type="file"
+                            id="forge-card-upload"
+                            className="hidden"
+                            accept=".json,.png"
+                            onChange={handleForgeCardUpload}
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
                             onClick={forgeHistory.undo}
                             disabled={!forgeHistory.canUndo}
                             className="h-8 px-2 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
@@ -1716,6 +1769,13 @@ export default function App() {
                           </Button>
                         </div>
                       </div>
+
+                      {forgeBaseCard && (
+                        <div className="rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] p-3 text-xs text-slate-600">
+                          Loaded base card: <span className="font-semibold text-slate-800">{forgeBaseCard.name || "Unnamed Card"}</span>.  
+                          You can now alternate it by selecting a style guide/template and using per-field AI or auto-fill.
+                        </div>
+                      )}
                       
                       <div className="space-y-2">
                         <Label htmlFor="guideSelect" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
