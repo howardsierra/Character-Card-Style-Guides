@@ -17,6 +17,14 @@ export interface AIModel {
   name: string;
 }
 
+const customMaxCompletionSupport = new Map<string, boolean>();
+
+function isUnsupportedMaxCompletionError(errMsg: string): boolean {
+  const normalized = errMsg.toLowerCase();
+  return normalized.includes("max_completion_tokens") &&
+    (normalized.includes("unsupported") || normalized.includes("unknown") || normalized.includes("invalid"));
+}
+
 export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<AIModel[]> {
   try {
     switch (provider) {
@@ -318,21 +326,46 @@ async function callAIProvider(
             { role: "user", content: prompt }
           ],
         };
-        const res = await fetch(keys.customEndpoint, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.customKey}`,
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error?.message || errData.message || res.statusText;
-          throw new Error(`Custom API error: ${errMsg}`);
+
+        const sendRequest = async (includeMaxCompletionTokens: boolean) => {
+          const res = await fetch(keys.customEndpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${keys.customKey}`,
+            },
+            body: JSON.stringify(createBody(includeMaxCompletionTokens)),
+          });
+
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            const errMsg = errData.error?.message || errData.message || res.statusText;
+            return { ok: false as const, errMsg };
+          }
+
+          const data = await res.json();
+          return { ok: true as const, data };
+        };
+
+        const shouldTryMaxCompletion = cachedSupport !== false;
+        let usedFallbackWithoutMaxCompletion = false;
+        let result = await sendRequest(shouldTryMaxCompletion);
+
+        if (!result.ok && shouldTryMaxCompletion && isUnsupportedMaxCompletionError(result.errMsg)) {
+          customMaxCompletionSupport.set(capabilityKey, false);
+          usedFallbackWithoutMaxCompletion = true;
+          result = await sendRequest(false);
         }
-        const data = await res.json();
-        return data.choices[0].message.content;
+
+        if (!result.ok) {
+          throw new Error(`Custom API error: ${result.errMsg}`);
+        }
+
+        if (shouldTryMaxCompletion && !usedFallbackWithoutMaxCompletion) {
+          customMaxCompletionSupport.set(capabilityKey, true);
+        }
+
+        return result.data.choices[0].message.content;
       }
       default:
         throw new Error("Unknown provider");
