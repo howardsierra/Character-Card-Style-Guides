@@ -522,25 +522,13 @@ export async function extractSlotsFromTemplate(
   if (templateExample) {
     const exampleSlots = extractSlotsViaRegex(templateExample);
 
-    // Enrich template slots with example descriptions
+    // Enrich template slots with example descriptions (example content shows what goes in each field)
     for (const slot of templateSlots) {
       const exampleMatch = exampleSlots.find(
         e => e.name.toLowerCase() === slot.name.toLowerCase()
       );
       if (exampleMatch && exampleMatch.description && (!slot.description || slot.description.startsWith('Fill in'))) {
         slot.description = `e.g., "${exampleMatch.description}"`;
-      }
-    }
-
-    // Add any example-only slots not already present
-    for (const exSlot of exampleSlots) {
-      if (!templateSlots.find(s => s.name.toLowerCase() === exSlot.name.toLowerCase())) {
-        templateSlots.push({
-          name: exSlot.name,
-          description: exSlot.description
-            ? `e.g., "${exSlot.description}"`
-            : `Fill in the ${exSlot.name.toLowerCase()}`
-        });
       }
     }
   }
