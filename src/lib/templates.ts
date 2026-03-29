@@ -246,9 +246,9 @@ THE BLACKMAIL SITUATION
 
 > SEXUAL PREFERENCES
 - Role: Dominant/Switch/Submissive (situational / default / flexible)
-- Style: rough, verbal, controlling etc.
-- Likes: X, Y, Z
-- Dislikes: X
+- Sexual Style: rough, verbal, controlling etc.
+- Sexual Likes: X, Y, Z
+- Sexual Dislikes: X
 - Boundaries: X
 - Aftercare: brief description
 
