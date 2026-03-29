@@ -268,7 +268,6 @@ export default function App() {
         if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
         if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
         if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
-        if (parsed.forgeBaseCard !== undefined) setForgeBaseCard(parsed.forgeBaseCard);
       } catch (e) {
         console.error("Failed to load app autosave", e);
       }
