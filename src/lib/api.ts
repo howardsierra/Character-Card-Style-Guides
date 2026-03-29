@@ -246,7 +246,6 @@ async function callAIProvider(
       case "openai": {
         const body: any = {
           model: model || "gpt-4-turbo-preview",
-          max_tokens: maxTokens,
           max_completion_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
@@ -279,7 +278,6 @@ async function callAIProvider(
       case "openrouter": {
         const body: any = {
           model: model || "anthropic/claude-3-opus",
-          max_tokens: maxTokens,
           max_completion_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
@@ -314,7 +312,9 @@ async function callAIProvider(
       case "custom": {
         const body: any = {
           model: model || "default",
+          // Keep compatibility with OpenAI-compatible backends that still expect max_tokens.
           max_tokens: maxTokens,
+          max_completion_tokens: maxTokens,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt }
