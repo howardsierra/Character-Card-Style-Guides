@@ -962,9 +962,9 @@ export default function App() {
         newSlots[index] = { ...newSlots[index], value: generatedText };
         return newSlots;
       });
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to generate slot content.");
+      alert(`Failed to generate slot content: ${err?.message || "Unknown error"}`);
     } finally {
       setGeneratingSlotIndex(null);
     }
