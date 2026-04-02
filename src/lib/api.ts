@@ -1060,7 +1060,8 @@ export async function generateCharacterImage(
   model: string = "gemini-3.1-flash-image-preview",
   aspectRatio: string = "3:4",
   imageSize: string = "1K",
-  style: string = ""
+  style: string = "",
+  referenceImagesBase64: string[] = []
 ): Promise<string> {
   try {
     const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY || "dummy" });
@@ -1080,12 +1081,25 @@ export async function generateCharacterImage(
       config.imageConfig.imageSize = imageSize;
     }
 
+    const parts: any[] = [{ text: finalPrompt }];
+    
+    for (const refImage of referenceImagesBase64) {
+      const mimeType = refImage.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/)?.[1] || "image/jpeg";
+      const base64Data = refImage.split(",")[1];
+      if (base64Data) {
+        parts.push({
+          inlineData: {
+            data: base64Data,
+            mimeType: mimeType,
+          }
+        });
+      }
+    }
+
     const response = await ai.models.generateContent({
       model: model,
       contents: {
-        parts: [
-          { text: finalPrompt },
-        ],
+        parts: parts,
       },
       config
     });

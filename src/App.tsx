@@ -15,7 +15,6 @@ import { CardTemplate, DEFAULT_TEMPLATES } from "./lib/templates";
 import ReactMarkdown from "react-markdown";
 import { motion, AnimatePresence } from "motion/react";
 import { toPng } from "html-to-image";
-import html2pdf from "html2pdf.js";
 import UniverseMap from "./components/UniverseMap";
 import { ModelSelector } from "./components/ModelSelector";
 import { useHistory } from "./hooks/useHistory";
@@ -128,6 +127,7 @@ export default function App() {
   const [scriptPrompt, setScriptPrompt] = useState("");
   const [generatedScript, setGeneratedScript] = useState("");
   const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [scriptValidationError, setScriptValidationError] = useState<string | null>(null);
 
   const getProviderAndModel = (sectionId: string) => {
     const config = sectionConfigs[sectionId];
@@ -191,6 +191,7 @@ export default function App() {
   const [imageAspectRatio, setImageAspectRatio] = useState("3:4");
   const [imageSize, setImageSize] = useState("1K");
   const [imageStyle, setImageStyle] = useState("None");
+  const [studioReferenceImages, setStudioReferenceImages] = useState<string[]>([]);
 
   const [forgedCardState, setForgedCardState, forgedCardHistory] = useHistory<CharacterCard | null>(null);
   const forgedCard = forgedCardState;
@@ -848,7 +849,7 @@ export default function App() {
     alert("Reverted to previous version!");
   };
 
-  const exportPDF = () => {
+  const exportPDF = async () => {
     if (!guideRef.current) return;
     const opt = {
       margin: 15,
@@ -857,7 +858,14 @@ export default function App() {
       html2canvas: { scale: 2, useCORS: true },
       jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
     };
-    html2pdf().set(opt).from(guideRef.current).save();
+    try {
+      const html2pdfModule = await import('html2pdf.js');
+      const html2pdf = html2pdfModule.default || html2pdfModule;
+      await html2pdf().set(opt).from(guideRef.current).save();
+    } catch (err) {
+      console.error("Failed to export PDF:", err);
+      alert("Failed to export PDF. Please try again.");
+    }
   };
 
   const exportJSON = () => {
@@ -993,6 +1001,7 @@ export default function App() {
     if (!scriptPrompt.trim()) return;
     
     setIsGeneratingScript(true);
+    setScriptValidationError(null);
     try {
       const { currentProvider, currentModel } = getProviderAndModel("universe");
       const result = await generateScript(
@@ -1001,6 +1010,23 @@ export default function App() {
         scriptPrompt,
         currentModel
       );
+      
+      // Basic validation using acorn
+      try {
+        const acorn = await import('acorn');
+        // Strip markdown code blocks if present
+        let codeToValidate = result;
+        if (codeToValidate.startsWith('```')) {
+          const lines = codeToValidate.split('\n');
+          if (lines[0].startsWith('```')) lines.shift();
+          if (lines[lines.length - 1].startsWith('```')) lines.pop();
+          codeToValidate = lines.join('\n');
+        }
+        acorn.parse(codeToValidate, { ecmaVersion: 'latest', sourceType: 'module' });
+      } catch (parseErr: any) {
+        setScriptValidationError(`Syntax Error: ${parseErr.message}`);
+      }
+
       setGeneratedScript(result);
     } catch (err: any) {
       console.error(err);
@@ -1163,6 +1189,37 @@ export default function App() {
     e.target.value = "";
   };
 
+  const handleStudioReferenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+
+    const newImages: string[] = [];
+    let processed = 0;
+
+    files.forEach(file => {
+      if (file.size > 5 * 1024 * 1024) {
+        alert(`Image ${file.name} must be less than 5MB`);
+        processed++;
+        if (processed === files.length && newImages.length > 0) {
+           setStudioReferenceImages(prev => [...prev, ...newImages].slice(0, 3));
+        }
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const base64 = event.target?.result as string;
+        newImages.push(base64);
+        processed++;
+        if (processed === files.length) {
+          setStudioReferenceImages(prev => [...prev, ...newImages].slice(0, 3));
+        }
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = "";
+  };
+
   const handleGenerateStudioImagePrompt = async () => {
     if (!studioSelectedCard) {
       alert("Please select a character card first.");
@@ -1204,7 +1261,7 @@ export default function App() {
         modelToUse = "gemini-3.1-flash-image-preview";
       }
 
-      const imageBase64 = await generateCharacterImage(apiKeys, studioImagePrompt, modelToUse, imageAspectRatio, imageSize, imageStyle);
+      const imageBase64 = await generateCharacterImage(apiKeys, studioImagePrompt, modelToUse, imageAspectRatio, imageSize, imageStyle, studioReferenceImages);
       setStudioCharacterImage(imageBase64);
     } catch (err) {
       console.error(err);
@@ -2154,6 +2211,16 @@ export default function App() {
                         </div>
                       </div>
 
+                      {!forgeSelectedGuide && !forgeSelectedTemplate && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center mt-6">
+                          <Info className="w-8 h-8 text-blue-500 mx-auto mb-3" />
+                          <h4 className="text-lg font-medium text-blue-900 mb-2">Ready to Forge?</h4>
+                          <p className="text-blue-700 text-sm max-w-md mx-auto">
+                            To get started, please select a <strong>Style Guide</strong> to define the author's voice, and a <strong>Template</strong> to determine the structure of your character card.
+                          </p>
+                        </div>
+                      )}
+
                       {forgeSlots.length > 0 && (
                         <div className="flex flex-col gap-2 pt-4 pb-2 border-b border-[#e5e4e2] mb-4">
                           <div className="flex items-center justify-between">
@@ -2750,7 +2817,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
                         <div className="space-y-2">
                           <Label className="text-xs font-bold tracking-widest text-slate-400 uppercase">Aspect Ratio</Label>
                           <select
@@ -2778,7 +2845,7 @@ export default function App() {
                             <option value="4K">4K</option>
                           </select>
                         </div>
-                        <div className="space-y-2">
+                        <div className="space-y-2 md:col-span-2">
                           <Label className="text-xs font-bold tracking-widest text-slate-400 uppercase">Art Style</Label>
                           <select
                             value={imageStyle}
@@ -2795,6 +2862,51 @@ export default function App() {
                             <option value="Watercolor">Watercolor</option>
                             <option value="Comic Book">Comic Book</option>
                           </select>
+                        </div>
+                        
+                        <div className="space-y-2 md:col-span-2">
+                          <Label className="text-xs font-bold tracking-widest text-slate-400 uppercase">Reference Images (Optional, Max 3)</Label>
+                          <div className="flex flex-col gap-4">
+                            {studioReferenceImages.length > 0 && (
+                              <div className="flex flex-wrap gap-4">
+                                {studioReferenceImages.map((img, idx) => (
+                                  <div key={idx} className="relative w-16 h-16 rounded-xl overflow-hidden border border-[#e5e4e2] shrink-0 group">
+                                    <img src={img} alt={`Reference ${idx + 1}`} className="w-full h-full object-cover" />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                      <Button
+                                        variant="ghost"
+                                        size="icon"
+                                        className="w-6 h-6 text-white hover:text-red-400 hover:bg-transparent"
+                                        onClick={() => setStudioReferenceImages(prev => prev.filter((_, i) => i !== idx))}
+                                      >
+                                        <X className="w-4 h-4" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {studioReferenceImages.length < 3 && (
+                              <div className="flex-1">
+                                <Button
+                                  variant="outline"
+                                  onClick={() => document.getElementById('studio-reference-upload')?.click()}
+                                  className="w-full h-10 border-dashed border-[#e5e4e2] text-slate-500 hover:text-[#8B3A3A] hover:bg-slate-50 hover:border-[#8B3A3A]/30"
+                                >
+                                  <Upload className="w-4 h-4 mr-2" />
+                                  Upload Reference Image
+                                </Button>
+                                <input
+                                  type="file"
+                                  id="studio-reference-upload"
+                                  className="hidden"
+                                  accept="image/*"
+                                  multiple
+                                  onChange={handleStudioReferenceUpload}
+                                />
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -3048,7 +3160,14 @@ export default function App() {
 
                     <div className="flex-1 min-h-[400px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden flex flex-col">
                       <div className="p-4 border-b border-[#e5e4e2] bg-[#f9f8f6] flex justify-between items-center">
-                        <h3 className="font-medium text-slate-700">Generated Script</h3>
+                        <div className="flex items-center gap-4">
+                          <h3 className="font-medium text-slate-700">Generated Script</h3>
+                          {scriptValidationError && (
+                            <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-md border border-red-200">
+                              {scriptValidationError}
+                            </span>
+                          )}
+                        </div>
                         {generatedScript && (
                           <Button
                             variant="outline"

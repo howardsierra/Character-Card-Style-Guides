@@ -18,6 +18,14 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
   const [newLinkTarget, setNewLinkTarget] = useState("");
   const [newLinkType, setNewLinkType] = useState<"relationship" | "pipeline">("relationship");
   const [newLinkLabel, setNewLinkLabel] = useState("");
+  const [tooltip, setTooltip] = useState<{
+    show: boolean;
+    x: number;
+    y: number;
+    title: string;
+    subtitle?: string;
+    content?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!data || !data.nodes.length || !svgRef.current || !containerRef.current) return;
@@ -96,7 +104,24 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
       .attr("stroke-opacity", 0.6)
       .attr("stroke-width", d => d.type === "pipeline" ? 3 : 1.5)
       .attr("stroke-dasharray", d => d.type === "pipeline" ? "none" : "5,5")
-      .attr("marker-end", d => d.type === "pipeline" ? "url(#arrow-pipeline)" : "");
+      .attr("marker-end", d => d.type === "pipeline" ? "url(#arrow-pipeline)" : "")
+      .on("mouseover", (event, d: any) => {
+        const [x, y] = d3.pointer(event, containerRef.current);
+        setTooltip({
+          show: true,
+          x,
+          y,
+          title: d.type.toUpperCase(),
+          content: d.label || ""
+        });
+      })
+      .on("mousemove", (event) => {
+        const [x, y] = d3.pointer(event, containerRef.current);
+        setTooltip(prev => prev ? { ...prev, x, y } : null);
+      })
+      .on("mouseout", () => {
+        setTooltip(null);
+      });
 
     // Add link labels
     const linkLabel = g.append("g")
@@ -123,6 +148,24 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
         setSelectedNode(d as UniverseNode);
         setIsAddingLink(false);
         event.stopPropagation();
+      })
+      .on("mouseover", (event, d: any) => {
+        const [x, y] = d3.pointer(event, containerRef.current);
+        setTooltip({
+          show: true,
+          x,
+          y,
+          title: d.name,
+          subtitle: d.group,
+          content: d.description
+        });
+      })
+      .on("mousemove", (event) => {
+        const [x, y] = d3.pointer(event, containerRef.current);
+        setTooltip(prev => prev ? { ...prev, x, y } : null);
+      })
+      .on("mouseout", () => {
+        setTooltip(null);
       });
 
     node.append("path")
@@ -208,6 +251,21 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
     <div className="relative w-full h-full flex flex-col md:flex-row" ref={containerRef}>
       <svg ref={svgRef} className="w-full h-full min-h-[400px] bg-slate-50 rounded-2xl border border-[#e5e4e2]" />
       
+      {tooltip && tooltip.show && (
+        <div 
+          className="absolute bg-slate-900 text-white text-xs rounded-md px-3 py-2 max-w-xs z-50 pointer-events-none shadow-lg transition-opacity duration-200"
+          style={{ 
+            left: tooltip.x + 10, 
+            top: tooltip.y - 28,
+            transform: 'translate(0, -100%)'
+          }}
+        >
+          <div className="font-bold">{tooltip.title}</div>
+          {tooltip.subtitle && <div className="text-slate-300 mt-0.5">{tooltip.subtitle}</div>}
+          {tooltip.content && <div className="text-slate-200 mt-2">{tooltip.content}</div>}
+        </div>
+      )}
+
       {selectedNode && (
         <div className="absolute top-4 right-4 w-80 bg-white/90 backdrop-blur-sm p-4 rounded-xl shadow-lg border border-[#e5e4e2] z-10 max-h-[80vh] overflow-y-auto">
           <div className="flex justify-between items-start">
