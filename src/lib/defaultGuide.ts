@@ -1,5 +1,5 @@
 export const DEFAULT_GUIDE_CONTENT = `
-# ELYSIANSYNA COMPLETE STYLE GUIDE
+# ELYSIANSUNS COMPLETE STYLE GUIDE
 A Comprehensive Reference for Character Card Creation
 Version 6.0 • Based on 44 Character Cards • 27 Unique Characters
 Spanning Contemporary, Fantasy, Sci-Fi, Monster Romance & Workplace Genres

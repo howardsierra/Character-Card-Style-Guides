@@ -1,14 +1,15 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Checkbox } from "./components/ui/checkbox";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import { cn } from "./lib/utils";
 import { CharacterCard, parseFile, parsePdfToText, parseDocxToText } from "./lib/parser";
-import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData } from "./lib/api";
+import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
 import { DEFAULT_GUIDE_CONTENT } from "./lib/defaultGuide";
 import { CardTemplate, DEFAULT_TEMPLATES } from "./lib/templates";
 import ReactMarkdown from "react-markdown";
@@ -19,7 +20,7 @@ import UniverseMap from "./components/UniverseMap";
 import { ModelSelector } from "./components/ModelSelector";
 import { useHistory } from "./hooks/useHistory";
 
-type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "image" | "settings";
+type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "script" | "image" | "settings";
 const APP_AUTOSAVE_KEY = "st_app_autosave_v1";
 
 interface GuideVersion {
@@ -124,6 +125,9 @@ export default function App() {
   const [isExtractingUniverse, setIsExtractingUniverse] = useState(false);
   const [universeSelectedGuide, setUniverseSelectedGuide] = useState<string>("");
   const [universeSelectedCards, setUniverseSelectedCards] = useState<Set<string>>(new Set());
+  const [scriptPrompt, setScriptPrompt] = useState("");
+  const [generatedScript, setGeneratedScript] = useState("");
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
 
   const getProviderAndModel = (sectionId: string) => {
     const config = sectionConfigs[sectionId];
@@ -157,7 +161,13 @@ export default function App() {
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
   const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>("");
   const [customTemplates, setCustomTemplates] = useState<CardTemplate[]>([]);
+  const [isTemplateEditorOpen, setIsTemplateEditorOpen] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateName, setEditingTemplateName] = useState("");
+  const [editingTemplateContent, setEditingTemplateContent] = useState("");
+  const [editingTemplateExample, setEditingTemplateExample] = useState("");
   const [isForging, setIsForging] = useState(false);
+  const [forgeError, setForgeError] = useState<string | null>(null);
   const [isExtractingSlots, setIsExtractingSlots] = useState(false);
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
   const [generatingSlotIndex, setGeneratingSlotIndex] = useState<number | null>(null);
@@ -168,6 +178,9 @@ export default function App() {
   const [isGeneratingImagePrompt, setIsGeneratingImagePrompt] = useState(false);
   const [characterImage, setCharacterImage] = useState("");
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  
+  const [suggestedSong, setSuggestedSong] = useState<{title: string, artist: string, reason: string} | null>(null);
+  const [isSuggestingSong, setIsSuggestingSong] = useState(false);
 
   // Image Studio State
   const [studioImagePrompt, setStudioImagePrompt] = useState("");
@@ -223,8 +236,8 @@ export default function App() {
       setGuides(JSON.parse(savedGuides));
     } else {
       setGuides([{
-        id: "default-elysiansyna",
-        title: "Elysiansyna Complete Style Guide v6.0",
+        id: "default-elysiansuns",
+        title: "ElysianSuns Complete Style Guide v6.0",
         content: DEFAULT_GUIDE_CONTENT,
         date: new Date().toISOString(),
         versions: []
@@ -536,6 +549,107 @@ export default function App() {
     e.target.value = "";
   };
 
+  const openTemplateEditor = (templateId?: string) => {
+    const draftStr = localStorage.getItem("st_template_draft");
+    let useDraft = false;
+    if (draftStr) {
+      if (confirm("You have an unsaved template draft. Would you like to restore it?")) {
+        try {
+          const draft = JSON.parse(draftStr);
+          setEditingTemplateId(draft.id);
+          setEditingTemplateName(draft.name);
+          setEditingTemplateContent(draft.content);
+          setEditingTemplateExample(draft.example);
+          useDraft = true;
+        } catch (e) {
+          console.error("Failed to parse template draft", e);
+        }
+      } else {
+        localStorage.removeItem("st_template_draft");
+      }
+    }
+
+    if (!useDraft) {
+      if (templateId) {
+        const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === templateId);
+        if (template) {
+          setEditingTemplateId(template.id.startsWith('custom-') ? template.id : null);
+          setEditingTemplateName(template.id.startsWith('custom-') ? template.name : `${template.name} (Copy)`);
+          setEditingTemplateContent(template.content);
+          setEditingTemplateExample(template.example || "");
+        }
+      } else {
+        setEditingTemplateId(null);
+        setEditingTemplateName("");
+        setEditingTemplateContent("");
+        setEditingTemplateExample("");
+      }
+    }
+    setIsTemplateEditorOpen(true);
+  };
+
+  const handleTemplateFieldChange = (field: 'name' | 'content' | 'example', value: string) => {
+    let newName = editingTemplateName;
+    let newContent = editingTemplateContent;
+    let newExample = editingTemplateExample;
+
+    if (field === 'name') {
+      newName = value;
+      setEditingTemplateName(value);
+    } else if (field === 'content') {
+      newContent = value;
+      setEditingTemplateContent(value);
+    } else if (field === 'example') {
+      newExample = value;
+      setEditingTemplateExample(value);
+    }
+
+    const draft = {
+      id: editingTemplateId,
+      name: newName,
+      content: newContent,
+      example: newExample
+    };
+    localStorage.setItem("st_template_draft", JSON.stringify(draft));
+  };
+
+  const saveTemplate = () => {
+    if (!editingTemplateName.trim() || !editingTemplateContent.trim()) {
+      alert("Template name and content are required.");
+      return;
+    }
+
+    if (editingTemplateId) {
+      setCustomTemplates(prev => prev.map(t => t.id === editingTemplateId ? {
+        ...t,
+        name: editingTemplateName,
+        content: editingTemplateContent,
+        example: editingTemplateExample
+      } : t));
+      setForgeSelectedTemplate(editingTemplateId);
+    } else {
+      const newTemplate: CardTemplate = {
+        id: `custom-${Date.now()}`,
+        name: editingTemplateName,
+        content: editingTemplateContent,
+        example: editingTemplateExample
+      };
+      setCustomTemplates(prev => [...prev, newTemplate]);
+      setForgeSelectedTemplate(newTemplate.id);
+    }
+    localStorage.removeItem("st_template_draft");
+    setIsTemplateEditorOpen(false);
+  };
+
+  const deleteCustomTemplate = (id: string) => {
+    if (confirm("Are you sure you want to delete this custom template?")) {
+      setCustomTemplates(prev => prev.filter(t => t.id !== id));
+      if (forgeSelectedTemplate === id) {
+        setForgeSelectedTemplate("");
+      }
+    }
+  };
+
   const normalizeSlotName = (name: string) =>
     name.toLowerCase().replace(/[^a-z0-9]/g, "");
 
@@ -583,6 +697,7 @@ export default function App() {
       setForgeConcept(uploadedCard.personality || "");
       setForgeFirstMessageIdea(uploadedCard.first_mes || uploadedCard.scenario || "");
       setForgedCard(uploadedCard);
+      setSuggestedSong(null);
       setForgeSlots(prev => applyCardToSlots(prev, uploadedCard));
       setView("create");
       alert("Base card loaded into Card Forge. Choose a style guide/template and use AI tools to alternate it.");
@@ -874,6 +989,27 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view, forgeHistory]);
 
+  const handleGenerateScript = async () => {
+    if (!scriptPrompt.trim()) return;
+    
+    setIsGeneratingScript(true);
+    try {
+      const { currentProvider, currentModel } = getProviderAndModel("universe");
+      const result = await generateScript(
+        currentProvider,
+        apiKeys,
+        scriptPrompt,
+        currentModel
+      );
+      setGeneratedScript(result);
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate script: " + err.message);
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  };
+
   const handleExtractUniverse = async () => {
     if (!universeSelectedGuide && universeSelectedCards.size === 0) return;
     
@@ -895,13 +1031,32 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (forgeError) {
+      setForgeError(null);
+    }
+  }, [forgeName, forgeConcept, forgeSelectedGuide]);
+
   const handleForgeCard = async () => {
-    if (!forgeName || !forgeConcept || !forgeSelectedGuide) return;
+    setForgeError(null);
+    const missingFields = [];
+    if (!forgeName.trim()) missingFields.push("Character Name");
+    if (!forgeConcept.trim()) missingFields.push("Core Concept / Archetype");
+    if (!forgeSelectedGuide) missingFields.push("Style Guide Base");
+
+    if (missingFields.length > 0) {
+      setForgeError(`Please fill in the following required fields: ${missingFields.join(", ")}`);
+      return;
+    }
     
     const guide = guides.find(g => g.id === forgeSelectedGuide);
-    if (!guide) return;
+    if (!guide) {
+      setForgeError("Selected Style Guide not found.");
+      return;
+    }
 
     setIsForging(true);
+    setSuggestedSong(null);
     try {
       const allSlots = [
         { name: "Name", value: forgeName },
@@ -950,6 +1105,22 @@ export default function App() {
     }
   };
 
+  const handleSuggestSong = async () => {
+    if (!forgedCard) return;
+    setIsSuggestingSong(true);
+    try {
+      const { suggestThemeSong } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const song = await suggestThemeSong(currentProvider, apiKeys, forgedCard, currentModel);
+      setSuggestedSong(song);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to suggest theme song.");
+    } finally {
+      setIsSuggestingSong(false);
+    }
+  };
+
   const handleGenerateImage = async () => {
     if (!imagePrompt) return;
     setIsGeneratingImage(true);
@@ -977,6 +1148,19 @@ export default function App() {
     } finally {
       setIsGeneratingImage(false);
     }
+  };
+
+  const handleForgeImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      setCharacterImage(result);
+    };
+    reader.readAsDataURL(file);
+    e.target.value = "";
   };
 
   const handleGenerateStudioImagePrompt = async () => {
@@ -1120,6 +1304,38 @@ export default function App() {
     }
   };
 
+  const handleRandomizeArchetype = () => {
+    const archetypes = [
+      "The Grumpy Bodyguard",
+      "A cynical detective with a heart of gold",
+      "Enemies to Lovers - Rival CEO",
+      "Cyberpunk Hacker with a secret",
+      "Vampire Lord who is tired of immortality",
+      "Sunshine Barista x Grumpy Regular",
+      "Rebellious Prince/Princess",
+      "Stoic Knight sworn to protect you",
+      "Chaotic Neutral Mage",
+      "Space Smuggler with a debt",
+      "Yandere Childhood Friend",
+      "Tsundere Class President",
+      "Overworked Demon Lord",
+      "Time Traveler trying to fix a mistake",
+      "Rogue AI discovering emotions"
+    ];
+    const random = archetypes[Math.floor(Math.random() * archetypes.length)];
+    setForgeConcept(random);
+  };
+
+  const estimateTokens = (text: string) => {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    // Could add a toast here, but simple alert or silent is fine for now
+  };
+
   const handleAutoFill = async () => {
     if (!forgeName || !forgeConcept) {
       alert("Please provide a Name and Core Concept first.");
@@ -1151,7 +1367,7 @@ export default function App() {
   const downloadForgedCard = () => {
     if (!forgedCard) return;
     
-    const cardData = {
+    const cardData: any = {
       spec: "chara_card_v2",
       spec_version: "2.0",
       data: {
@@ -1179,7 +1395,7 @@ export default function App() {
   const saveForgedCard = () => {
     if (!forgedCard) return;
     
-    const cardToSave = { ...forgedCard };
+    const cardToSave: any = { ...forgedCard };
     if (characterImage) {
       cardToSave.image = characterImage;
     }
@@ -1235,6 +1451,7 @@ export default function App() {
           <NavButton view="create" icon={Wand2} label="Card Forge" currentView={view} setView={setView} />
           <NavButton view="image" icon={ImageIcon} label="Portrait Studio" currentView={view} setView={setView} />
           <NavButton view="universe" icon={Network} label="Universe Map" currentView={view} setView={setView} />
+          <NavButton view="script" icon={FileJson} label="Script Forge" currentView={view} setView={setView} />
           <NavButton view="settings" icon={Settings} label="Configuration" currentView={view} setView={setView} />
         </nav>
       </div>
@@ -1723,9 +1940,14 @@ export default function App() {
                       )}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-                    {/* Input Form */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                    <Tabs defaultValue="details" className="w-full">
+                      <TabsList className="grid w-full grid-cols-2 mb-6 h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60">
+                        <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all">Character Details</TabsTrigger>
+                        <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all">Output Preview</TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="details" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#8B3A3A]/20 via-[#8B3A3A] to-[#8B3A3A]/20"></div>
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Character Details</h3>
@@ -1824,6 +2046,24 @@ export default function App() {
                               </optgroup>
                             )}
                           </select>
+                          {forgeSelectedTemplate && (
+                            <Button
+                              variant="outline"
+                              className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                              onClick={() => openTemplateEditor(forgeSelectedTemplate)}
+                              title={forgeSelectedTemplate.startsWith('custom-') ? "Edit Template" : "Edit as Custom Template"}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            onClick={() => openTemplateEditor()}
+                            title="Create New Template"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </Button>
                           <Button
                             variant="outline"
                             className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
@@ -1832,6 +2072,16 @@ export default function App() {
                           >
                             <Upload className="w-4 h-4" />
                           </Button>
+                          {forgeSelectedTemplate?.startsWith('custom-') && (
+                            <Button
+                              variant="outline"
+                              className="h-11 px-3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors"
+                              onClick={() => deleteCustomTemplate(forgeSelectedTemplate)}
+                              title="Delete Custom Template"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                           <input
                             type="file"
                             id="template-upload"
@@ -1871,6 +2121,15 @@ export default function App() {
                               className="h-11 rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all flex-1"
                               autoComplete="off"
                             />
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={handleRandomizeArchetype}
+                              className="h-11 w-11 rounded-xl border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-500 transition-colors shrink-0"
+                              title="Randomize Archetype"
+                            >
+                              <Dices className="w-5 h-5" />
+                            </Button>
                             <Button
                               variant="outline"
                               onClick={handleSuggestArchetype}
@@ -1992,9 +2251,14 @@ export default function App() {
                             isFetchingModels={isFetchingModels}
                           />
                         </div>
+                        {forgeError && (
+                          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm">
+                            {forgeError}
+                          </div>
+                        )}
                         <Button 
                           onClick={handleForgeCard} 
-                          disabled={isForging || !forgeName || !forgeConcept || !forgeSelectedGuide} 
+                          disabled={isForging} 
                           className="w-full rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white py-6 text-lg shadow-md shadow-[#8B3A3A]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                         >
                           {isForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
@@ -2002,12 +2266,21 @@ export default function App() {
                         </Button>
                       </div>
                     </div>
+                      </TabsContent>
 
-                    {/* Output Preview */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
+                      {/* Output Preview */}
+                      <TabsContent value="preview" className="mt-0 focus-visible:outline-none focus-visible:ring-0 h-full">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
-                        <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Forged Output</h3>
+                        <div className="flex items-center gap-3">
+                          <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Forged Output</h3>
+                          {forgedCard && (
+                            <span className="bg-slate-100 text-slate-500 text-xs font-mono px-2 py-1 rounded-md border border-slate-200">
+                              ~{estimateTokens((forgedCard.description || "") + (forgedCard.personality || "") + (forgedCard.first_mes || "") + (forgedCard.scenario || "") + (forgedCard.mes_example || ""))} total tokens
+                            </span>
+                          )}
+                        </div>
                         {forgedCard && (
                           <div className="flex items-center gap-2 flex-wrap">
                             <div className="flex items-center gap-1 mr-2">
@@ -2111,6 +2384,21 @@ export default function App() {
                                       {isGeneratingImage ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <ImageIcon className="w-3 h-3 mr-2" />}
                                       Generate Image
                                     </Button>
+                                    <Button
+                                      variant="outline"
+                                      className="flex-1 rounded-xl text-xs h-9 border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A]"
+                                      onClick={() => document.getElementById('card-image-upload')?.click()}
+                                    >
+                                      <Upload className="w-3 h-3 mr-2" />
+                                      Upload Image
+                                    </Button>
+                                    <input
+                                      type="file"
+                                      id="card-image-upload"
+                                      className="hidden"
+                                      accept="image/*"
+                                      onChange={handleForgeImageUpload}
+                                    />
                                   </div>
                                   <div className="grid grid-cols-3 gap-2 mt-2">
                                     <div className="space-y-1">
@@ -2198,6 +2486,39 @@ export default function App() {
                               </div>
                             </div>
 
+                            {/* Theme Song Section */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
+                                  <Music className="w-4 h-4 text-[#8B3A3A]" />
+                                  Theme Song Suggestion
+                                </h4>
+                                <Button 
+                                  onClick={handleSuggestSong} 
+                                  disabled={isSuggestingSong}
+                                  variant="outline"
+                                  className="h-8 text-xs border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A]"
+                                >
+                                  {isSuggestingSong ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
+                                  Suggest Song
+                                </Button>
+                              </div>
+                              {suggestedSong && (
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                  <div className="flex items-start gap-3">
+                                    <div className="bg-slate-100 p-2 rounded-lg text-[#8B3A3A]">
+                                      <Music className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                      <h5 className="font-bold text-slate-900">{suggestedSong.title}</h5>
+                                      <p className="text-sm text-slate-500 mb-2">by {suggestedSong.artist}</p>
+                                      <p className="text-sm text-slate-700 italic">"{suggestedSong.reason}"</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
                             <div>
                               <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Name</h4>
                               <Input 
@@ -2208,7 +2529,15 @@ export default function App() {
                             </div>
                             
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Description</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Description</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.description)} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.description)}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.description}
                                 onChange={(e) => setForgedCard({ ...forgedCard, description: e.target.value })}
@@ -2217,7 +2546,15 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Personality</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Personality</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.personality)} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.personality)}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.personality}
                                 onChange={(e) => setForgedCard({ ...forgedCard, personality: e.target.value })}
@@ -2226,7 +2563,15 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">First Message</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">First Message</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.first_mes)} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.first_mes)}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.first_mes}
                                 onChange={(e) => setForgedCard({ ...forgedCard, first_mes: e.target.value })}
@@ -2235,7 +2580,15 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Scenario</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Scenario</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.scenario || "")} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.scenario || "")}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.scenario || ""}
                                 onChange={(e) => setForgedCard({ ...forgedCard, scenario: e.target.value })}
@@ -2244,7 +2597,15 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Example Messages</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Example Messages</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.mes_example || "")} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.mes_example || "")}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.mes_example || ""}
                                 onChange={(e) => setForgedCard({ ...forgedCard, mes_example: e.target.value })}
@@ -2292,8 +2653,9 @@ export default function App() {
                           </div>
                         </ScrollArea>
                       )}
-                    </div>
-                  </div>
+                        </div>
+                      </TabsContent>
+                    </Tabs>
                   )}
                 </motion.div>
               )}
@@ -2529,7 +2891,7 @@ export default function App() {
                     <div>
                       <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Universe Map</h2>
                       <p className="text-slate-500 text-base md:text-lg font-light mt-2">
-                        Visualize character relationships and the NPC-to-Protagonist pipeline.
+                        Visualize character relationships and extract shared universes.
                       </p>
                     </div>
                     <ModelSelector
@@ -2543,89 +2905,180 @@ export default function App() {
                     />
                   </div>
 
-                  <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
-                    <div className="flex flex-col md:flex-row gap-4 items-end">
-                      <div className="space-y-2 flex-1 w-full">
-                        <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
-                          Select Style Guide to Analyze (Optional)
-                        </Label>
-                        <select
-                          id="universeGuideSelect"
-                          value={universeSelectedGuide}
-                          onChange={(e) => setUniverseSelectedGuide(e.target.value)}
-                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                  <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+                      <div className="flex flex-col md:flex-row gap-4 items-end">
+                        <div className="space-y-2 flex-1 w-full">
+                          <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
+                            Select Style Guide to Analyze (Optional)
+                          </Label>
+                          <select
+                            id="universeGuideSelect"
+                            value={universeSelectedGuide}
+                            onChange={(e) => setUniverseSelectedGuide(e.target.value)}
+                            className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                          >
+                            <option value="">No guide selected (Use cards only)</option>
+                            {guides.map((g) => (
+                              <option key={g.id} value={g.id}>{g.title}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <Button 
+                          onClick={handleExtractUniverse} 
+                          disabled={isExtractingUniverse || (!universeSelectedGuide && universeSelectedCards.size === 0)} 
+                          className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
                         >
-                          <option value="">No guide selected (Use cards only)</option>
-                          {guides.map((g) => (
-                            <option key={g.id} value={g.id}>{g.title}</option>
-                          ))}
-                        </select>
+                          {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
+                          Extract Universe
+                        </Button>
                       </div>
-                      <Button 
-                        onClick={handleExtractUniverse} 
-                        disabled={isExtractingUniverse || (!universeSelectedGuide && universeSelectedCards.size === 0)} 
+
+                      {savedCards.length > 0 && (
+                        <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
+                          <Label className="text-slate-700 font-medium flex items-center">
+                            Include Saved Cards in Lore Building
+                          </Label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            {savedCards.map(card => (
+                              <div key={card.id} className="flex items-center space-x-2 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]">
+                                <Checkbox 
+                                  id={`universe-card-${card.id}`}
+                                  checked={universeSelectedCards.has(card.id)}
+                                  onCheckedChange={(checked) => {
+                                    setUniverseSelectedCards(prev => {
+                                      const next = new Set(prev);
+                                      if (checked) next.add(card.id);
+                                      else next.delete(card.id);
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <label
+                                  htmlFor={`universe-card-${card.id}`}
+                                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer truncate"
+                                >
+                                  {card.name}
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-h-[500px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
+                      {isExtractingUniverse ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/80 backdrop-blur-sm z-20">
+                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                          <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Analyzing Relationships...</h4>
+                          <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
+                            Extracting characters, shared universes, and pipeline progressions.
+                          </p>
+                        </div>
+                      ) : universeData && universeData.nodes.length > 0 ? (
+                        <UniverseMap data={universeData} onAddLink={handleAddUniverseLink} />
+                      ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
+                          <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
+                            <Network className="w-6 h-6 text-slate-400" />
+                          </div>
+                          <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
+                          <p className="text-slate-500 mt-2 max-w-xs text-sm">
+                            Select a style guide or character cards, then click Extract Universe to visualize relationships.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* SCRIPT FORGE VIEW */}
+              {view === "script" && (
+                <motion.div
+                  key="script"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6 md:space-y-8 h-full flex flex-col"
+                >
+                  <div className="border-b border-[#e5e4e2] pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div>
+                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Script Forge</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                        Build JanitorAI scripts and lorebooks.
+                      </p>
+                    </div>
+                    <ModelSelector
+                      sectionId="script"
+                      globalProvider={provider}
+                      globalModels={apiModels}
+                      sectionConfigs={sectionConfigs}
+                      setSectionConfigs={setSectionConfigs}
+                      availableModels={availableModels}
+                      isFetchingModels={isFetchingModels}
+                    />
+                  </div>
+
+                  <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700 font-medium">Describe the Script You Want</Label>
+                        <p className="text-sm text-slate-500">
+                          Explain what you want the JanitorAI script to do. For example: "Make the character fall asleep if the user says 'goodnight'", or "Create a lorebook for a magical forest".
+                        </p>
+                        <Textarea
+                          value={scriptPrompt}
+                          onChange={(e) => setScriptPrompt(e.target.value)}
+                          placeholder="Describe your script logic here..."
+                          className="min-h-[120px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                        />
+                      </div>
+                      <Button
+                        onClick={handleGenerateScript}
+                        disabled={isGeneratingScript || !scriptPrompt.trim()}
                         className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
                       >
-                        {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
-                        Extract Universe
+                        {isGeneratingScript ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                        Generate Script
                       </Button>
                     </div>
 
-                    {savedCards.length > 0 && (
-                      <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
-                        <Label className="text-slate-700 font-medium flex items-center">
-                          Include Saved Cards in Lore Building
-                        </Label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                          {savedCards.map(card => (
-                            <div key={card.id} className="flex items-center space-x-2 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]">
-                              <Checkbox 
-                                id={`universe-card-${card.id}`}
-                                checked={universeSelectedCards.has(card.id)}
-                                onCheckedChange={(checked) => {
-                                  setUniverseSelectedCards(prev => {
-                                    const next = new Set(prev);
-                                    if (checked) next.add(card.id);
-                                    else next.delete(card.id);
-                                    return next;
-                                  });
-                                }}
-                              />
-                              <label
-                                htmlFor={`universe-card-${card.id}`}
-                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer truncate"
-                              >
-                                {card.name}
-                              </label>
-                            </div>
-                          ))}
-                        </div>
+                    <div className="flex-1 min-h-[400px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden flex flex-col">
+                      <div className="p-4 border-b border-[#e5e4e2] bg-[#f9f8f6] flex justify-between items-center">
+                        <h3 className="font-medium text-slate-700">Generated Script</h3>
+                        {generatedScript && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(generatedScript);
+                              alert("Script copied to clipboard!");
+                            }}
+                            className="h-8 rounded-lg"
+                          >
+                            <Copy className="w-4 h-4 mr-2" />
+                            Copy
+                          </Button>
+                        )}
                       </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-h-[500px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
-                    {isExtractingUniverse ? (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/80 backdrop-blur-sm z-20">
-                        <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
-                        <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Analyzing Relationships...</h4>
-                        <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
-                          Extracting characters, shared universes, and pipeline progressions.
-                        </p>
+                      <div className="flex-1 p-4 overflow-auto bg-slate-900 text-slate-50 font-mono text-sm">
+                        {isGeneratingScript ? (
+                          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                            <Loader2 className="w-8 h-8 animate-spin mb-4" />
+                            <p>Forging script...</p>
+                          </div>
+                        ) : generatedScript ? (
+                          <pre className="whitespace-pre-wrap break-words">{generatedScript}</pre>
+                        ) : (
+                          <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                            <p>Your generated script will appear here.</p>
+                          </div>
+                        )}
                       </div>
-                    ) : universeData && universeData.nodes.length > 0 ? (
-                      <UniverseMap data={universeData} onAddLink={handleAddUniverseLink} />
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
-                        <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
-                          <Network className="w-6 h-6 text-slate-400" />
-                        </div>
-                        <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
-                        <p className="text-slate-500 mt-2 max-w-xs text-sm">
-                          Select a style guide or character cards, then click Extract Universe to visualize relationships.
-                        </p>
-                      </div>
-                    )}
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -2824,6 +3277,84 @@ export default function App() {
                 </motion.div>
               )}
 
+            </AnimatePresence>
+
+            {/* Template Editor Modal */}
+            <AnimatePresence>
+              {isTemplateEditorOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="bg-white rounded-3xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-[#e5e4e2]"
+                  >
+                    <div className="p-6 border-b border-[#e5e4e2] flex justify-between items-center bg-[#f9f8f6]">
+                      <h3 className="text-2xl font-serif font-medium text-slate-900">
+                        {editingTemplateId ? "Edit Template" : "Create New Template"}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setIsTemplateEditorOpen(false)}
+                        className="rounded-full hover:bg-white text-slate-500 hover:text-slate-900"
+                      >
+                        <X className="w-5 h-5" />
+                      </Button>
+                    </div>
+                    <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="templateName" className="text-slate-700 font-medium">Template Name <span className="text-red-500">*</span></Label>
+                        <Input
+                          id="templateName"
+                          value={editingTemplateName}
+                          onChange={(e) => handleTemplateFieldChange('name', e.target.value)}
+                          placeholder="e.g. My Custom RPG Template"
+                          className="h-11 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="templateContent" className="text-slate-700 font-medium">Template Content <span className="text-red-500">*</span></Label>
+                        <p className="text-sm text-slate-500">Define the structure of the character card. Use Markdown or plain text.</p>
+                        <Textarea
+                          id="templateContent"
+                          value={editingTemplateContent}
+                          onChange={(e) => handleTemplateFieldChange('content', e.target.value)}
+                          placeholder="Setting:&#10;* Full Name:&#10;* Age:&#10;..."
+                          className="min-h-[300px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] font-mono text-sm"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="templateExample" className="text-slate-700 font-medium">Template Example (Optional)</Label>
+                        <p className="text-sm text-slate-500">Provide an example of a filled-out template to guide the AI.</p>
+                        <Textarea
+                          id="templateExample"
+                          value={editingTemplateExample}
+                          onChange={(e) => handleTemplateFieldChange('example', e.target.value)}
+                          placeholder="Setting: Modern Day&#10;* Full Name: John Doe&#10;* Age: 30&#10;..."
+                          className="min-h-[200px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] font-mono text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="p-6 border-t border-[#e5e4e2] bg-[#f9f8f6] flex justify-end gap-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => setIsTemplateEditorOpen(false)}
+                        className="rounded-xl border-[#e5e4e2] hover:bg-white text-slate-700"
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        onClick={saveTemplate}
+                        className="rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Template
+                      </Button>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
             </AnimatePresence>
 
             {/* Hidden Export Container */}

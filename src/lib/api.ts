@@ -174,7 +174,7 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
 
 const SYSTEM_PROMPT = `You are an expert literary analyst and character designer. Your task is to analyze a collection of character cards (from the same creator) and generate a comprehensive writing style guide that captures their unique authorial voice, formatting, and structural DNA.
 
-The output MUST be formatted as a Markdown document that closely matches the structure and sections of the "Elysiansyna Style Guide" example.
+The output MUST be formatted as a Markdown document that closely matches the structure and sections of the "ElysianSuns Style Guide" example.
 
 Required Sections:
 1. Description Structure & Template (How they format their character definitions)
@@ -318,13 +318,26 @@ async function callAIProvider(
         return choice.message?.content || choice.text || "";
       }
       case "custom": {
-        const body: any = {
-          model: model || "default",
-          max_completion_tokens: maxTokens,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt }
-          ],
+        const capabilityKey = keys.customEndpoint;
+        const cachedSupport = customMaxCompletionSupport.get(capabilityKey);
+
+        const createBody = (includeMaxCompletionTokens: boolean) => {
+          const body: any = {
+            model: model || "default",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: prompt }
+            ],
+          };
+          if (includeMaxCompletionTokens) {
+            body.max_completion_tokens = maxTokens;
+          } else {
+            body.max_tokens = maxTokens;
+          }
+          if (jsonMode) {
+            body.response_format = { type: "json_object" };
+          }
+          return body;
         };
 
         const sendRequest = async (includeMaxCompletionTokens: boolean) => {
@@ -466,7 +479,46 @@ export async function generateCharacterCard(
     }
     prompt += `\nSTYLE GUIDE (dictates writing voice, prose style, and tone — follow its conventions for phrasing, detail level, and stylistic techniques):\n${styleGuide}\n`;
   } else {
-    prompt += `Create a character card using the ElysianSuns bracketed-section format. The card MUST use bracketed section headers (e.g., [Basic Information:, [Background:, [Core Personality:, etc.) with bullet points (* ) for each field.
+    prompt += `Create a character card using the ElysianSuns bracketed-section format. The card MUST use bracketed section headers with bullet points (* ) for each field.
+    
+REQUIRED FORMAT:
+[Basic Information:
+* Name:
+* Age:
+* Gender/Pronouns:
+* Occupation:
+* Appearance: ]
+[Background:
+* ]
+[Core Personality:
+* Archetype:
+* Traits:
+* Goal:
+* Behavioral Patterns:
+* Likes:
+* Dislikes: ]
+[Boundaries:
+* ]
+[Emotional Responses:
+* Positive Reactions:
+* Negative Reactions:
+* Neutral Responses: ]
+[Specific Scenarios and Responses:
+* ]
+[Dialogue: (These are merely examples of how {{char}} might speak and should not be used verbatim.)
+* Speech Style:
+* Greeting:
+* Angry Response:
+* Teasing:
+* Intimate: ]
+[Relationships:
+* ]
+[Sexual Behavior:
+* Sexual Orientation:
+* Genitalia:
+* Kinks:
+* During intercourse:
+* Unique Sexual Quirks: ]
 
 STYLE GUIDE (dictates writing voice, prose style, and tone — follow its conventions for phrasing, detail level, and stylistic techniques):
 ${styleGuide}
@@ -646,6 +698,7 @@ export function extractSlotsFromGuide(): { name: string; description: string }[]
   // The style guide informs HOW to write (tone, prose, voice), not WHAT fields to extract.
   return [
     { name: "Age", description: "Character's age or age range" },
+    { name: "Gender/Pronouns", description: "Character's gender identity and pronouns" },
     { name: "Occupation", description: "Character's job, role, or source of income" },
     { name: "Appearance", description: "Physical description: height, build, hair, eyes, skin, distinguishing features, fashion, scent" },
     { name: "Background", description: "Origin story, key life events, and formative experiences that shaped who they are" },
@@ -659,9 +712,14 @@ export function extractSlotsFromGuide(): { name: string; description: string }[]
     { name: "Positive Reactions", description: "How the character behaves when happy, comfortable, or affectionate" },
     { name: "Negative Reactions", description: "How the character behaves when angry, hurt, or threatened" },
     { name: "Neutral Responses", description: "Default behavior in everyday, low-stakes interactions" },
-    { name: "Specific Scenarios", description: "2-4 concrete example situations showing the character in action" },
+    { name: "Specific Scenarios and Responses", description: "2-4 concrete example situations showing the character in action" },
     { name: "Speech Style", description: "How the character talks: tone, vocabulary, verbal quirks, and example dialogue lines" },
+    { name: "Greeting", description: "Example of how they say hello" },
+    { name: "Angry Response", description: "Example of how they speak when angry" },
+    { name: "Teasing", description: "Example of how they tease" },
+    { name: "Intimate", description: "Example of how they speak intimately" },
     { name: "Relationships", description: "Key connections: {{user}}, family, friends, rivals, enemies — with brief descriptions of each dynamic" },
+    { name: "Sexual Orientation", description: "Character's sexual orientation" },
     { name: "Genitalia", description: "Physical intimate details" },
     { name: "Kinks", description: "Sexual preferences, dynamics, and turn-ons" },
     { name: "During intercourse", description: "Behavior, demeanor, and tendencies during sex" },
@@ -686,6 +744,53 @@ export interface UniverseLink {
 export interface UniverseData {
   nodes: UniverseNode[];
   links: UniverseLink[];
+}
+
+import { SCRIPT_GUIDE } from "./scriptPrompt";
+
+export async function generateScript(
+  provider: AIProvider,
+  keys: ApiKeys,
+  promptText: string,
+  model?: string
+): Promise<string> {
+  const prompt = `You are an expert Character AI scripter, specializing in JanitorAI scripts.
+Your task is to generate a JavaScript script based on the user's request.
+
+${SCRIPT_GUIDE}
+
+USER REQUEST:
+${promptText}
+
+OUTPUT INSTRUCTIONS:
+- Output ONLY valid ES5 JavaScript code.
+- Do not include markdown code blocks (\`\`\`) in the final output, just the raw code.
+- Add brief comments explaining what the code does.
+- Ensure the code is safe and won't crash the bot.`;
+
+  let result = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert Character AI scripter. Output only the requested JavaScript code.",
+    false,
+    4000,
+    model
+  );
+  
+  // Clean up markdown if present
+  if (result.startsWith("\`\`\`javascript")) {
+    result = result.replace(/^\`\`\`javascript\n/, "");
+    result = result.replace(/\n\`\`\`$/, "");
+  } else if (result.startsWith("\`\`\`js")) {
+    result = result.replace(/^\`\`\`js\n/, "");
+    result = result.replace(/\n\`\`\`$/, "");
+  } else if (result.startsWith("\`\`\`")) {
+    result = result.replace(/^\`\`\`\n/, "");
+    result = result.replace(/\n\`\`\`$/, "");
+  }
+  
+  return result.trim();
 }
 
 export async function extractUniverse(
@@ -731,7 +836,7 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
 
   try {
     if (provider === "gemini") {
-      const ai = new GoogleGenAI({ apiKey: keys.gemini || "dummy" });
+      const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY || "dummy" });
       const response = await ai.models.generateContent({
         model: model || "gemini-3.1-flash-preview",
         contents: prompt,
@@ -915,6 +1020,38 @@ CHARACTER DETAILS:
 ${characterDetails}`;
 
   return callAIProvider(provider, keys, prompt, "You are an expert AI image prompt engineer.", false, 1000, model);
+}
+
+export async function suggestThemeSong(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: any,
+  model?: string
+): Promise<{ title: string; artist: string; reason: string }> {
+  const prompt = `Based on the following character card, suggest a fitting theme song for this character.
+Return ONLY a valid JSON object with the following structure, and no markdown formatting or other text:
+{
+  "title": "Song Title",
+  "artist": "Artist Name",
+  "reason": "A short 1-2 sentence explanation of why this song fits the character's personality, background, or vibe."
+}
+
+Character Card:
+${JSON.stringify(card, null, 2)}`;
+
+  const response = await callAIProvider(provider, keys, prompt, "You are a music supervisor and character analyst.", true, 500, model);
+  
+  try {
+    const parsed = JSON.parse(response);
+    return {
+      title: parsed.title || "Unknown Title",
+      artist: parsed.artist || "Unknown Artist",
+      reason: parsed.reason || "No reason provided."
+    };
+  } catch (e) {
+    console.error("Failed to parse theme song JSON:", response);
+    throw new Error("Failed to generate a valid theme song suggestion.");
+  }
 }
 
 export async function generateCharacterImage(
