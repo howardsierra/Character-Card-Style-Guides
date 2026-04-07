@@ -137,6 +137,11 @@ export default function App() {
   };
 
   // Card Forge State
+  const [vibePrompt, setVibePrompt] = useState("");
+  const [isVibeForging, setIsVibeForging] = useState(false);
+  const [autoFillVibe, setAutoFillVibe] = useState("");
+  const [slotVibes, setSlotVibes] = useState<Record<number, string>>({});
+  const [forgeActiveTab, setForgeActiveTab] = useState("details");
   const [forgeState, setForgeState, forgeHistory] = useHistory({
     name: "",
     concept: "",
@@ -860,7 +865,7 @@ export default function App() {
     };
     try {
       const html2pdfModule = await import('html2pdf.js');
-      const html2pdf = html2pdfModule.default || html2pdfModule;
+      const html2pdf = (html2pdfModule.default || html2pdfModule) as any;
       await html2pdf().set(opt).from(guideRef.current).save();
     } catch (err) {
       console.error("Failed to export PDF:", err);
@@ -1345,7 +1350,8 @@ export default function App() {
         otherSlots,
         guide.content,
         currentModel,
-        templateExample
+        templateExample,
+        slotVibes[index]
       );
       
       setForgeSlots(prev => {
@@ -1393,6 +1399,54 @@ export default function App() {
     // Could add a toast here, but simple alert or silent is fine for now
   };
 
+  const handleVibeForge = async () => {
+    if (!vibePrompt.trim()) {
+      alert("Please enter a vibe or description first.");
+      return;
+    }
+    if (!forgeSelectedGuide) {
+      alert("Please select a Style Guide first.");
+      return;
+    }
+    setIsVibeForging(true);
+    try {
+      const { vibeForgeCard } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_vibe");
+      const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
+      const templateExample = template?.example;
+      const guide = guides.find(g => g.id === forgeSelectedGuide);
+      
+      const result = await vibeForgeCard(
+        currentProvider,
+        apiKeys,
+        vibePrompt,
+        forgeSlots,
+        currentModel,
+        templateExample,
+        guide?.content
+      );
+
+      setForgeName(result.name);
+      setForgeConcept(result.concept);
+      if (result.firstMessageIdea) {
+        setForgeFirstMessageIdea(result.firstMessageIdea);
+      }
+      
+      setForgeSlots(prev => prev.map(slot => ({
+        ...slot,
+        value: result.slots[slot.name] || slot.value
+      })));
+      
+      setForgeActiveTab("details");
+      
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to vibe forge: " + err.message);
+    } finally {
+      setIsVibeForging(false);
+    }
+  };
+
   const handleAutoFill = async () => {
     if (!forgeName || !forgeConcept) {
       alert("Please provide a Name and Core Concept first.");
@@ -1406,7 +1460,7 @@ export default function App() {
       const templateExample = template?.example;
 
       const guide = guides.find(g => g.id === forgeSelectedGuide);
-      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel, templateExample, guide?.content);
+      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel, templateExample, guide?.content, autoFillVibe);
       setForgeSlots(prev => prev.map(slot => {
         if (filledData[slot.name]) {
           return { ...slot, value: filledData[slot.name] };
@@ -1997,11 +2051,63 @@ export default function App() {
                       )}
                     </div>
                   ) : (
-                    <Tabs defaultValue="details" className="w-full">
-                      <TabsList className="grid w-full grid-cols-2 mb-6 h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60">
-                        <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all">Character Details</TabsTrigger>
-                        <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all">Output Preview</TabsTrigger>
+                    <Tabs value={forgeActiveTab} onValueChange={setForgeActiveTab} className="w-full">
+                      <TabsList className="flex flex-col sm:grid w-full sm:grid-cols-3 mb-6 h-auto sm:h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 gap-1 sm:gap-0">
+                        <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Character Details</TabsTrigger>
+                        <TabsTrigger value="vibe" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Vibe Forge</TabsTrigger>
+                        <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Output Preview</TabsTrigger>
                       </TabsList>
+
+                      <TabsContent value="vibe" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500/20 via-purple-500 to-purple-500/20"></div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Vibe Forge</h3>
+                          </div>
+                          
+                          <div className="bg-purple-50 border border-purple-200 rounded-xl p-6 mb-6">
+                            <h4 className="text-lg font-medium text-purple-900 mb-2">Vibe Coding for Characters</h4>
+                            <p className="text-purple-700 text-sm">
+                              Describe your character in a few sentences. The AI will use your Style Guide and Template to automatically construct the entire character card based on your vibe.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="vibePrompt" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Character Vibe / Description <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <Textarea 
+                              id="vibePrompt"
+                              placeholder="e.g., A grumpy old wizard who secretly loves cats and baking pastries. He's very cynical but has a soft spot for the user..." 
+                              value={vibePrompt}
+                              onChange={(e) => setVibePrompt(e.target.value)}
+                              className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-purple-500/50 focus-visible:border-purple-500 transition-all min-h-[150px] resize-y"
+                            />
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row sm:justify-end pt-4 gap-4 sm:items-center">
+                            <div className="w-full sm:w-auto flex justify-start sm:justify-end">
+                              <ModelSelector
+                                sectionId="forge_vibe"
+                                globalProvider={provider}
+                                globalModels={apiModels}
+                                sectionConfigs={sectionConfigs}
+                                setSectionConfigs={setSectionConfigs}
+                                availableModels={availableModels}
+                                isFetchingModels={isFetchingModels}
+                              />
+                            </div>
+                            <Button 
+                              onClick={handleVibeForge}
+                              disabled={isVibeForging || !vibePrompt.trim() || !forgeSelectedGuide}
+                              className="w-full sm:w-auto h-12 px-8 rounded-xl bg-purple-600 hover:bg-purple-700 text-white shadow-md shadow-purple-600/20 transition-all text-base font-medium"
+                            >
+                              {isVibeForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
+                              Forge from Vibe
+                            </Button>
+                          </div>
+                        </div>
+                      </TabsContent>
 
                       <TabsContent value="details" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
                         <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
@@ -2222,30 +2328,44 @@ export default function App() {
                       )}
 
                       {forgeSlots.length > 0 && (
-                        <div className="flex flex-col gap-2 pt-4 pb-2 border-b border-[#e5e4e2] mb-4">
-                          <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-4 pt-4 pb-4 border-b border-[#e5e4e2] mb-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                             <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Character Details</h3>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={handleAutoFill}
-                              disabled={isAutoFilling || isExtractingSlots || !forgeName || !forgeConcept}
-                              className="h-8 text-xs text-[#8B3A3A] border-[#8B3A3A]/30 hover:bg-[#8B3A3A]/10"
-                            >
-                              {isAutoFilling ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
-                              Auto-Fill Empty Fields
-                            </Button>
+                            <div className="flex justify-start sm:justify-end">
+                              <ModelSelector
+                                sectionId="forge_autofill"
+                                globalProvider={provider}
+                                globalModels={apiModels}
+                                sectionConfigs={sectionConfigs}
+                                setSectionConfigs={setSectionConfigs}
+                                availableModels={availableModels}
+                                isFetchingModels={isFetchingModels}
+                              />
+                            </div>
                           </div>
-                          <div className="flex justify-end">
-                            <ModelSelector
-                              sectionId="forge_autofill"
-                              globalProvider={provider}
-                              globalModels={apiModels}
-                              sectionConfigs={sectionConfigs}
-                              setSectionConfigs={setSectionConfigs}
-                              availableModels={availableModels}
-                              isFetchingModels={isFetchingModels}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                            <Label className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center">
+                              Auto-Fill Vibe / Instructions <span className="text-slate-400 font-normal ml-2 normal-case">(Optional)</span>
+                              <InfoTooltip text="Provide specific instructions or a 'vibe' for the AI to follow when auto-filling the remaining empty fields." />
+                            </Label>
+                            <Textarea
+                              placeholder="e.g., Make the personality traits focus on their dark past, and make the appearance very gothic..."
+                              value={autoFillVibe}
+                              onChange={(e) => setAutoFillVibe(e.target.value)}
+                              className="h-20 text-sm bg-white rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A]"
                             />
+                            <div className="flex justify-end">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={handleAutoFill}
+                                disabled={isAutoFilling || isExtractingSlots || !forgeName || !forgeConcept}
+                                className="h-9 px-4 text-xs text-[#8B3A3A] border-[#8B3A3A]/30 hover:bg-[#8B3A3A]/10 rounded-lg"
+                              >
+                                {isAutoFilling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                                Auto-Fill Empty Fields
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -2258,22 +2378,30 @@ export default function App() {
                       ) : (
                         forgeSlots.map((slot, index) => (
                           <div key={index} className="space-y-2">
-                            <div className="flex items-center justify-between">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
                               <Label htmlFor={`slot-${index}`} className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
                                 {slot.name}
                                 <InfoTooltip text={slot.description} />
                               </Label>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleGenerateSlot(index)}
-                                disabled={generatingSlotIndex === index || !forgeSelectedGuide}
-                                className="h-6 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-2"
-                                title={!forgeSelectedGuide ? "Select a style guide first" : "Auto-generate content for this field"}
-                              >
-                                {generatingSlotIndex === index ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
-                                Auto
-                              </Button>
+                              <div className="flex items-center gap-2 w-full sm:w-auto">
+                                <Input 
+                                  placeholder={`Vibe for ${slot.name}...`}
+                                  value={slotVibes[index] || ""}
+                                  onChange={(e) => setSlotVibes(prev => ({ ...prev, [index]: e.target.value }))}
+                                  className="h-8 text-xs bg-slate-50 border-slate-200 w-full sm:w-48 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A]"
+                                />
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleGenerateSlot(index)}
+                                  disabled={generatingSlotIndex === index || !forgeSelectedGuide}
+                                  className="h-8 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-3 shrink-0"
+                                  title={!forgeSelectedGuide ? "Select a style guide first" : "Auto-generate content for this field"}
+                                >
+                                  {generatingSlotIndex === index ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
+                                  Auto
+                                </Button>
+                              </div>
                             </div>
                             <Textarea 
                               id={`slot-${index}`}
@@ -2349,44 +2477,46 @@ export default function App() {
                           )}
                         </div>
                         {forgedCard && (
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <div className="flex items-center gap-1 mr-2">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={forgedCardHistory.undo}
-                                disabled={!forgedCardHistory.canUndo}
-                                className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
-                                title="Undo Generated Card"
-                              >
-                                <Undo2 className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={forgedCardHistory.redo}
-                                disabled={!forgedCardHistory.canRedo}
-                                className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
-                                title="Redo Generated Card"
-                              >
-                                <Redo2 className="w-4 h-4" />
-                              </Button>
+                          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-start sm:justify-end">
+                            <div className="flex items-center gap-1 mr-0 sm:mr-2 w-full sm:w-auto justify-between sm:justify-start mb-2 sm:mb-0">
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={forgedCardHistory.undo}
+                                  disabled={!forgedCardHistory.canUndo}
+                                  className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                                  title="Undo Generated Card"
+                                >
+                                  <Undo2 className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={forgedCardHistory.redo}
+                                  disabled={!forgedCardHistory.canRedo}
+                                  className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                                  title="Redo Generated Card"
+                                >
+                                  <Redo2 className="w-4 h-4" />
+                                </Button>
+                              </div>
                             </div>
                             <Button 
                               onClick={saveForgedCard}
                               variant="outline"
-                              className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                              className="flex-1 sm:flex-none rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
                             >
                               <Save className="w-4 h-4 mr-2" />
-                              Save to Library
+                              Save
                             </Button>
                             <Button 
                               onClick={downloadForgedCard}
                               variant="outline"
-                              className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                              className="flex-1 sm:flex-none rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
                             >
                               <Download className="w-4 h-4 mr-2" />
-                              Download JSON
+                              Download
                             </Button>
                           </div>
                         )}
@@ -2406,22 +2536,24 @@ export default function App() {
                             
                             {/* Image Generation Section */}
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
-                              <div className="flex items-center justify-between">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                                 <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
                                   <ImageIcon className="w-4 h-4 text-[#8B3A3A]" />
                                   Character Portrait
                                 </h4>
-                                <ModelSelector
-                                  sectionId="forge_image"
-                                  globalProvider={provider}
-                                  globalModels={apiModels}
-                                  sectionConfigs={sectionConfigs}
-                                  setSectionConfigs={setSectionConfigs}
-                                  availableModels={availableModels}
-                                  isFetchingModels={isFetchingModels}
-                                  allowedProviders={["gemini"]}
-                                  filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
-                                />
+                                <div className="flex justify-start sm:justify-end">
+                                  <ModelSelector
+                                    sectionId="forge_image"
+                                    globalProvider={provider}
+                                    globalModels={apiModels}
+                                    sectionConfigs={sectionConfigs}
+                                    setSectionConfigs={setSectionConfigs}
+                                    availableModels={availableModels}
+                                    isFetchingModels={isFetchingModels}
+                                    allowedProviders={["gemini"]}
+                                    filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
+                                  />
+                                </div>
                               </div>
                               
                               <div className="flex flex-col md:flex-row gap-4">
@@ -2555,7 +2687,7 @@ export default function App() {
 
                             {/* Theme Song Section */}
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
-                              <div className="flex items-center justify-between">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                                 <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
                                   <Music className="w-4 h-4 text-[#8B3A3A]" />
                                   Theme Song Suggestion
@@ -2564,10 +2696,10 @@ export default function App() {
                                   onClick={handleSuggestSong} 
                                   disabled={isSuggestingSong}
                                   variant="outline"
-                                  className="h-8 text-xs border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A]"
+                                  className="h-8 text-xs border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A] w-full sm:w-auto"
                                 >
                                   {isSuggestingSong ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
-                                  Suggest Song
+                                  Suggest Theme Song
                                 </Button>
                               </div>
                               {suggestedSong && (

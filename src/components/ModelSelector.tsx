@@ -77,26 +77,26 @@ export function ModelSelector({
     : ALL_PROVIDERS;
 
   return (
-    <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-center">
-      <div className="flex items-center gap-2">
-        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap">Provider</Label>
+    <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center w-full sm:w-auto">
+      <div className="flex items-center gap-2 w-full sm:w-auto">
+        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap min-w-[60px]">Provider</Label>
         <select
           value={currentProvider}
           onChange={(e) => handleProviderChange(e.target.value as AIProvider)}
-          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all"
+          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all w-full sm:w-auto"
         >
           {providersToShow.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
       </div>
-      <div className="flex items-center gap-2">
-        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap">Model</Label>
+      <div className="flex items-center gap-2 w-full sm:w-auto">
+        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap min-w-[60px]">Model</Label>
         <select
           value={currentModel}
           onChange={(e) => handleModelChange(e.target.value)}
           disabled={isFetchingModels[currentProvider] || modelsToShow.length === 0}
-          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all disabled:opacity-50 max-w-[200px] truncate"
+          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all disabled:opacity-50 w-full sm:max-w-[200px] truncate"
         >
           {isFetchingModels[currentProvider] ? (
             <option value="">Loading models...</option>

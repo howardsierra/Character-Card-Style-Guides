@@ -420,7 +420,8 @@ export async function generateSlotContent(
   otherSlots: { name: string; value: string }[],
   styleGuide: string,
   model?: string,
-  templateExample?: string
+  templateExample?: string,
+  vibePrompt?: string
 ): Promise<string> {
   const contextStr = otherSlots
     .filter(s => s.value.trim() !== "")
@@ -442,6 +443,7 @@ ${currentValue.trim() !== ""
   ? `Refine, expand upon, or complete the following existing content for the field "${slotName}":\n\nEXISTING CONTENT:\n${currentValue}\n\nMake sure the final output incorporates the existing ideas but improves them according to the Style Guide.` 
   : `Generate ONLY the content for the field "${slotName}".`}
 ${slotDescription ? `\nField Description/Hint: ${slotDescription}` : ""}
+${vibePrompt ? `\nSPECIFIC INSTRUCTIONS / VIBE FOR THIS FIELD:\n"${vibePrompt}"\n` : ""}
 ${templateExample ? `\nEXAMPLE OF FILLED TEMPLATE (Use this as a strict reference for formatting, tone, length, and level of detail for this field):\n${templateExample}` : ""}
 
 Keep the response concise, directly applicable to the field, and written in the tone dictated by the Style Guide. Do not include the field name in your response. Return ONLY the raw generated text.`;
@@ -913,6 +915,67 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
   }
 }
 
+export async function vibeForgeCard(
+  provider: AIProvider,
+  keys: ApiKeys,
+  vibePrompt: string,
+  slots: { name: string; description: string; value: string }[],
+  model?: string,
+  templateExample?: string,
+  styleGuide?: string
+): Promise<{ name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> }> {
+  const slotsPrompt = slots.map(s => `- ${s.name}: ${s.description}`).join("\n");
+
+  let prompt = `You are an expert character creator. I am building a character based on this "vibe" or description:
+"${vibePrompt}"
+
+Please generate a fitting Name, a Core Concept/Archetype, a First Message Idea, and appropriate content for the following character fields.
+Return ONLY a JSON object with the following structure:
+{
+  "name": "Generated Name",
+  "concept": "Generated Core Concept",
+  "firstMessageIdea": "Generated First Message Idea",
+  "slots": {
+    "Field Name 1": "Generated Content 1",
+    "Field Name 2": "Generated Content 2"
+  }
+}
+
+Fields to generate:
+${slotsPrompt}
+`;
+
+  if (styleGuide) {
+    prompt += `\n\nFollow this style guide for tone and formatting:\n${styleGuide}`;
+  }
+  if (templateExample) {
+    prompt += `\n\nFollow this template structure:\n${templateExample}`;
+  }
+
+  const response = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character creator. Output only valid JSON.",
+    true,
+    4000,
+    model
+  );
+  
+  try {
+    let jsonStr = response;
+    if (jsonStr.includes('```json')) {
+      jsonStr = jsonStr.split('```json')[1].split('```')[0].trim();
+    } else if (jsonStr.includes('```')) {
+      jsonStr = jsonStr.split('```')[1].split('```')[0].trim();
+    }
+    return JSON.parse(jsonStr);
+  } catch (e) {
+    console.error("Failed to parse vibe forge JSON:", response);
+    throw new Error("Failed to parse generated character details. Please try again.");
+  }
+}
+
 export async function autoFillSlots(
   provider: AIProvider,
   keys: ApiKeys,
@@ -921,7 +984,8 @@ export async function autoFillSlots(
   slots: { name: string; description: string; value: string }[],
   model?: string,
   templateExample?: string,
-  styleGuide?: string
+  styleGuide?: string,
+  vibePrompt?: string
 ): Promise<Record<string, string>> {
   const emptySlots = slots.filter(s => !s.value.trim());
   if (emptySlots.length === 0) return {};
@@ -934,6 +998,7 @@ export async function autoFillSlots(
 
 Please generate appropriate content for the following character fields.
 Return ONLY a JSON object where the keys are the exact field names and the values are the generated content.
+${vibePrompt ? `\nADDITIONAL INSTRUCTIONS / VIBE FOR THESE TRAITS:\n"${vibePrompt}"\n` : ""}
 ${filledContext ? `\nALREADY FILLED DETAILS (use these for context and consistency):\n${filledContext}\n` : ""}
 FIELDS TO FILL:
 ${slotsPrompt}`;
