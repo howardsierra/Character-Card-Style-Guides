@@ -2067,12 +2067,17 @@ export default function App() {
                       ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           {savedCards.map(saved => (
-                            <div key={saved.id} className="bg-white border border-[#e5e4e2] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group">
+                            <div key={saved.id} className="bg-white border border-[#e5e4e2] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group cursor-pointer" onClick={() => {
+                                    setForgeName(saved.name);
+                                    setForgeConcept(saved.concept);
+                                    setForgedCard(saved.card);
+                                    setShowSavedCards(false);
+                                  }}>
                               <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Button
                                   variant="outline"
                                   size="icon"
-                                  onClick={() => exportCardJson(saved.card)}
+                                  onClick={(e) => { e.stopPropagation(); exportCardJson(saved.card); }}
                                   className="h-8 w-8 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700"
                                   title="Download Card"
                                 >
@@ -2081,7 +2086,8 @@ export default function App() {
                                 <Button
                                   variant="outline"
                                   size="icon"
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setForgeName(saved.name);
                                     setForgeConcept(saved.concept);
                                     setForgedCard(saved.card);
@@ -2095,7 +2101,8 @@ export default function App() {
                                 <Button
                                   variant="outline"
                                   size="icon"
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     if (confirm("Are you sure you want to delete this saved card?")) {
                                       setSavedCards(prev => prev.filter(c => c.id !== saved.id));
                                     }
