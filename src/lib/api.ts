@@ -286,16 +286,58 @@ Analyze the provided character data deeply. Look for recurring patterns in:
 
 Output ONLY the Markdown document. Make it look professional and attractive.`;
 
-async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit, retries = 2): Promise<Response> {
+async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit, retries = 3, timeoutMs = 120_000): Promise<Response> {
   for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await fetch(input, init);
-    } catch (e) {
-      if (attempt === retries || !(e instanceof TypeError)) throw e;
-      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+      const res = await fetch(input, { ...init, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e: any) {
+      clearTimeout(timer);
+      const isTimeout = e?.name === "AbortError";
+      const isNetwork = e instanceof TypeError;
+      if (attempt === retries || (!isTimeout && !isNetwork)) {
+        if (isTimeout) throw new Error("The AI provider took too long to respond. Please try again.");
+        if (isNetwork) throw new Error("Network connection failed. Check your internet and try again.");
+        throw e;
+      }
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
     }
   }
   throw new Error("fetchWithRetry: unreachable");
+}
+
+async function readSSEStream(res: Response, onChunk?: (chunk: string) => void): Promise<string> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(payload);
+        // OpenAI-compatible format
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) { full += delta; onChunk?.(full); continue; }
+        // Anthropic format
+        if (parsed.type === "content_block_delta") {
+          const text = parsed.delta?.text;
+          if (text) { full += text; onChunk?.(full); }
+        }
+      } catch {}
+    }
+  }
+  return full;
 }
 
 async function callAIProvider(
@@ -305,7 +347,8 @@ async function callAIProvider(
   systemPrompt: string,
   jsonMode: boolean = false,
   maxTokens: number = 131072,
-  model?: string
+  model?: string,
+  onChunk?: (partialText: string) => void
 ): Promise<string> {
   try {
     let providerMaxTokens = maxTokens;
@@ -327,6 +370,19 @@ async function callAIProvider(
         if (jsonMode) {
           config.responseMimeType = "application/json";
         }
+        if (onChunk) {
+          let full = "";
+          const stream = await ai.models.generateContentStream({
+            model: model || "gemini-3.1-pro-preview",
+            contents: prompt,
+            config,
+          });
+          for await (const chunk of stream) {
+            const text = chunk.text || "";
+            if (text) { full += text; onChunk(full); }
+          }
+          return full;
+        }
         const response = await ai.models.generateContent({
           model: model || "gemini-3.1-pro-preview",
           contents: prompt,
@@ -335,6 +391,13 @@ async function callAIProvider(
         return response.text || "";
       }
       case "anthropic": {
+        const anthropicBody: any = {
+          model: model || "claude-3-opus-20240229",
+          max_tokens: providerMaxTokens,
+          system: finalSystemPrompt,
+          messages: [{ role: "user", content: prompt }],
+        };
+        if (onChunk) anthropicBody.stream = true;
         const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
@@ -343,17 +406,15 @@ async function callAIProvider(
             "anthropic-version": "2023-06-01",
             "anthropic-dangerous-direct-browser-access": "true"
           },
-          body: JSON.stringify({
-            model: model || "claude-3-opus-20240229",
-            max_tokens: providerMaxTokens,
-            system: finalSystemPrompt,
-            messages: [{ role: "user", content: prompt }],
-          }),
+          body: JSON.stringify(anthropicBody),
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           const errMsg = errData.error?.message || errData.message || res.statusText;
           throw new Error(`Anthropic API error: ${errMsg}`);
+        }
+        if (onChunk && res.body) {
+          return readSSEStream(res, onChunk);
         }
         const data = await res.json();
         return data.content[0].text;
@@ -375,6 +436,7 @@ async function callAIProvider(
           if (jsonMode) {
             body.response_format = { type: "json_object" };
           }
+          if (onChunk) body.stream = true;
           return body;
         };
 
@@ -391,6 +453,10 @@ async function callAIProvider(
             const errData = await res.json().catch(() => ({}));
             const errMsg = errData.error?.message || errData.message || res.statusText;
             return { ok: false as const, errMsg };
+          }
+          if (onChunk && res.body) {
+            const text = await readSSEStream(res, onChunk);
+            return { ok: true as const, data: { choices: [{ message: { content: text } }] } };
           }
           const data = await res.json();
           return { ok: true as const, data };
@@ -423,6 +489,7 @@ async function callAIProvider(
           } else {
             body.max_tokens = providerMaxTokens;
           }
+          if (onChunk) body.stream = true;
           return body;
         };
 
@@ -442,6 +509,10 @@ async function callAIProvider(
             const errData = await res.json().catch(() => ({}));
             const errMsg = errData.error?.message || errData.message || res.statusText;
             return { ok: false as const, errMsg };
+          }
+          if (onChunk && res.body) {
+            const text = await readSSEStream(res, onChunk);
+            return { ok: true as const, data: { choices: [{ message: { content: text } }] } };
           }
           const data = await res.json();
           return { ok: true as const, data };
@@ -477,6 +548,7 @@ async function callAIProvider(
           } else {
             body.max_tokens = providerMaxTokens;
           }
+          if (onChunk) body.stream = true;
           // Custom endpoints vary in JSON mode support, rely on prompt + regex parsing
           return body;
         };
@@ -495,6 +567,11 @@ async function callAIProvider(
             const errData = await res.json().catch(() => ({}));
             const errMsg = errData.error?.message || errData.message || res.statusText;
             return { ok: false as const, errMsg };
+          }
+
+          if (onChunk && res.body) {
+            const text = await readSSEStream(res, onChunk);
+            return { ok: true as const, data: { choices: [{ message: { content: text } }] } };
           }
 
           const data = await res.json();
@@ -610,7 +687,8 @@ export async function generateCharacterCard(
   template?: string,
   model?: string,
   firstMessageIdea?: string,
-  templateExample?: string
+  templateExample?: string,
+  onChunk?: (partialText: string) => void
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
   
@@ -705,7 +783,8 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
     "You are an expert character creator. Output only valid JSON.",
     true,
     16384,
-    model
+    model,
+    onChunk
   );
   return parseResponse(responseText);
 }
@@ -998,7 +1077,8 @@ export async function vibeForgeCard(
   slots: { name: string; description: string; value: string }[],
   model?: string,
   templateExample?: string,
-  styleGuide?: string
+  styleGuide?: string,
+  onChunk?: (partialText: string) => void
 ): Promise<{ name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> }> {
   const slotsPrompt = slots.map(s => `- ${s.name}: ${s.description}`).join("\n");
 
@@ -1036,9 +1116,10 @@ ${slotsPrompt}
     "You are an expert character creator. Output only valid JSON.",
     true,
     16384,
-    model
+    model,
+    onChunk
   );
-  
+
   try {
     return extractJSON(response) as { name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> };
   } catch (e: any) {
