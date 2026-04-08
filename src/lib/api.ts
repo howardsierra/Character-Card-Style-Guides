@@ -1,4 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
+import { jsonrepair } from "jsonrepair";
 import { CharacterCard } from "./parser";
 
 export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "custom";
@@ -214,10 +215,15 @@ async function callAIProvider(
   prompt: string,
   systemPrompt: string,
   jsonMode: boolean = false,
-  maxTokens: number = 4000,
+  maxTokens: number = 131072,
   model?: string
 ): Promise<string> {
   try {
+    let providerMaxTokens = maxTokens;
+    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 8192);
+    else if (provider === "openai") providerMaxTokens = Math.min(maxTokens, 16384);
+    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 8192);
+
     const finalSystemPrompt = jsonMode 
       ? `${systemPrompt}\n\nIMPORTANT: You must respond ONLY with valid JSON. Do not include any conversational text, markdown formatting, or explanations outside the JSON object. Ensure all strings are properly escaped.`
       : systemPrompt;
@@ -226,7 +232,7 @@ async function callAIProvider(
       case "gemini": {
         const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
         const config: any = {
-          maxOutputTokens: maxTokens,
+          maxOutputTokens: providerMaxTokens,
           systemInstruction: finalSystemPrompt,
         };
         if (jsonMode) {
@@ -250,7 +256,7 @@ async function callAIProvider(
           },
           body: JSON.stringify({
             model: model || "claude-3-opus-20240229",
-            max_tokens: maxTokens,
+            max_tokens: providerMaxTokens,
             system: finalSystemPrompt,
             messages: [{ role: "user", content: prompt }],
           }),
@@ -266,7 +272,7 @@ async function callAIProvider(
       case "openai": {
         const body: any = {
           model: model || "gpt-4-turbo-preview",
-          max_completion_tokens: maxTokens,
+          max_completion_tokens: providerMaxTokens,
           messages: [
             { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
@@ -298,7 +304,7 @@ async function callAIProvider(
       case "openrouter": {
         const body: any = {
           model: model || "anthropic/claude-3-opus",
-          max_completion_tokens: maxTokens,
+          max_completion_tokens: providerMaxTokens,
           messages: [
             { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
@@ -340,9 +346,9 @@ async function callAIProvider(
             ],
           };
           if (includeMaxCompletionTokens) {
-            body.max_completion_tokens = maxTokens;
+            body.max_completion_tokens = providerMaxTokens;
           } else {
-            body.max_tokens = maxTokens;
+            body.max_tokens = providerMaxTokens;
           }
           // Custom endpoints vary in JSON mode support, rely on prompt + regex parsing
           return body;
@@ -570,7 +576,7 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
           jsonStr = text.substring(firstBrace, lastBrace + 1);
         }
       }
-      return JSON.parse(jsonStr.trim());
+      return JSON.parse(jsonrepair(jsonStr.trim()));
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -584,7 +590,7 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    4000,
+    8192,
     model
   );
   return parseResponse(responseText);
@@ -694,7 +700,7 @@ ${templateExample}`;
         }
       }
       
-      const parsed = JSON.parse(jsonStr.trim());
+      const parsed = JSON.parse(jsonrepair(jsonStr.trim()));
       
       if (!Array.isArray(parsed)) {
         const possibleArray = Object.values(parsed).find(val => Array.isArray(val));
@@ -720,7 +726,7 @@ ${templateExample}`;
       prompt,
       "You are an expert character card analyst. Extract the required input fields from the provided template as a JSON array.",
       true,
-      4000,
+      8192,
       model
     );
     return parseResponse(responseText);
@@ -814,7 +820,7 @@ OUTPUT INSTRUCTIONS:
     prompt,
     "You are an expert Character AI scripter. Output only the requested JavaScript code.",
     false,
-    4000,
+    8192,
     model
   );
   
@@ -877,7 +883,7 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
           jsonStr = text.substring(firstBrace, lastBrace + 1);
         }
       }
-      return JSON.parse(jsonStr.trim());
+      return JSON.parse(jsonrepair(jsonStr.trim()));
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -892,7 +898,7 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
       prompt,
       "You are an expert relationship map generator. Output only valid JSON.",
       true,
-      4000,
+      8192,
       model
     );
     return parseResponse(responseText);
@@ -946,7 +952,7 @@ ${slotsPrompt}
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    4000,
+    8192,
     model
   );
   
@@ -962,7 +968,7 @@ ${slotsPrompt}
         jsonStr = response.substring(firstBrace, lastBrace + 1);
       }
     }
-    return JSON.parse(jsonStr.trim());
+    return JSON.parse(jsonrepair(jsonStr.trim()));
   } catch (e: any) {
     console.error("Failed to parse vibe forge JSON:", response);
     console.error("Parse error:", e);
@@ -1012,7 +1018,7 @@ ${slotsPrompt}`;
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    4000,
+    8192,
     model
   );
 
@@ -1028,7 +1034,7 @@ ${slotsPrompt}`;
         jsonStr = responseText.substring(firstBrace, lastBrace + 1);
       }
     }
-    return JSON.parse(jsonStr.trim());
+    return JSON.parse(jsonrepair(jsonStr.trim()));
   } catch (e: any) {
     console.error("Failed to parse auto-fill response:", responseText);
     console.error("Parse error:", e);
@@ -1124,7 +1130,7 @@ ${JSON.stringify(card, null, 2)}`;
         jsonStr = response.substring(firstBrace, lastBrace + 1);
       }
     }
-    const parsed = JSON.parse(jsonStr.trim());
+    const parsed = JSON.parse(jsonrepair(jsonStr.trim()));
     return {
       title: parsed.title || "Unknown Title",
       artist: parsed.artist || "Unknown Artist",

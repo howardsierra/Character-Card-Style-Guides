@@ -30,6 +30,7 @@
     "express": "^4.21.2",
     "html-to-image": "^1.11.13",
     "html2pdf.js": "^0.14.0",
+    "jsonrepair": "^3.13.3",
     "localforage": "^1.10.0",
     "lucide-react": "^0.546.0",
     "mammoth": "^1.12.0",
