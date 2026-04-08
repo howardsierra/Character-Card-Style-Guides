@@ -26,6 +26,59 @@ function isUnsupportedMaxCompletionError(errMsg: string): boolean {
     (normalized.includes("unsupported") || normalized.includes("unknown") || normalized.includes("invalid"));
 }
 
+function findBalancedJSON(text: string): string | null {
+  const openers = new Set(['{', '[']);
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (!openers.has(ch)) continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (escaped) { escaped = false; continue; }
+      if (c === '\\' && inString) { escaped = true; continue; }
+      if (c === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (c === '{' || c === '[') depth++;
+      if (c === '}' || c === ']') depth--;
+      if (depth === 0) {
+        return text.substring(i, j + 1);
+      }
+    }
+    // Braces never balanced — return from opener to end so jsonrepair can attempt to fix truncated JSON
+    return text.substring(i);
+  }
+  return null;
+}
+
+function extractJSON(text: string): unknown {
+  // Strategy 1: Extract from markdown code blocks (handles ```json, ```JSON, ```js, bare ``` etc.)
+  const codeBlockMatch = text.match(/```(?:\w+)?\s*\n?([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(jsonrepair(codeBlockMatch[1].trim()));
+    } catch {
+      // Fall through to strategy 2
+    }
+  }
+
+  // Strategy 2: Find first balanced JSON structure (skips prose braces)
+  const balanced = findBalancedJSON(text);
+  if (balanced) {
+    try {
+      return JSON.parse(jsonrepair(balanced.trim()));
+    } catch {
+      // Fall through to strategy 3
+    }
+  }
+
+  // Strategy 3: Try the raw text with jsonrepair as last resort
+  return JSON.parse(jsonrepair(text.trim()));
+}
+
 export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<AIModel[]> {
   try {
     switch (provider) {
@@ -563,24 +616,7 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
 
   const parseResponse = (text: string): CharacterCard => {
     try {
-      let jsonStr = text;
-      // Try to extract JSON from markdown code blocks
-      const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (match) {
-        jsonStr = match[1];
-      } else {
-        // Fallback: try to find the first '{' and last '}'
-        const firstBrace = text.indexOf('{');
-        const lastBrace = text.lastIndexOf('}');
-        if (firstBrace !== -1) {
-          if (lastBrace !== -1 && lastBrace > firstBrace) {
-            jsonStr = text.substring(firstBrace, lastBrace + 1);
-          } else {
-            jsonStr = text.substring(firstBrace);
-          }
-        }
-      }
-      return JSON.parse(jsonrepair(jsonStr.trim()));
+      return extractJSON(text) as CharacterCard;
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -686,41 +722,13 @@ ${templateExample}`;
 
   const parseResponse = (text: string) => {
     try {
-      let jsonStr = text;
-      const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (match) {
-        jsonStr = match[1];
-      } else {
-        const firstBracket = text.indexOf('[');
-        const lastBracket = text.lastIndexOf(']');
-        const firstBrace = text.indexOf('{');
-        const lastBrace = text.lastIndexOf('}');
-        
-        // If it looks like an array
-        if (firstBracket !== -1) {
-          if (lastBracket !== -1 && lastBracket > firstBracket) {
-            jsonStr = text.substring(firstBracket, lastBracket + 1);
-          } else {
-            jsonStr = text.substring(firstBracket);
-          }
-        } else if (firstBrace !== -1) {
-          if (lastBrace !== -1 && lastBrace > firstBrace) {
-            jsonStr = text.substring(firstBrace, lastBrace + 1);
-          } else {
-            jsonStr = text.substring(firstBrace);
-          }
-        }
-      }
-      
-      const parsed = JSON.parse(jsonrepair(jsonStr.trim()));
-      
-      if (!Array.isArray(parsed)) {
+      const parsed = extractJSON(text);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object') {
         const possibleArray = Object.values(parsed).find(val => Array.isArray(val));
         if (possibleArray) return possibleArray;
-        return [];
       }
-      
-      return parsed;
+      return [];
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -884,22 +892,7 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
 
   const parseResponse = (text: string): UniverseData => {
     try {
-      let jsonStr = text;
-      const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      if (match) {
-        jsonStr = match[1];
-      } else {
-        const firstBrace = text.indexOf('{');
-        const lastBrace = text.lastIndexOf('}');
-        if (firstBrace !== -1) {
-          if (lastBrace !== -1 && lastBrace > firstBrace) {
-            jsonStr = text.substring(firstBrace, lastBrace + 1);
-          } else {
-            jsonStr = text.substring(firstBrace);
-          }
-        }
-      }
-      return JSON.parse(jsonrepair(jsonStr.trim()));
+      return extractJSON(text) as UniverseData;
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -973,22 +966,7 @@ ${slotsPrompt}
   );
   
   try {
-    let jsonStr = response;
-    const match = response.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (match) {
-      jsonStr = match[1];
-    } else {
-      const firstBrace = response.indexOf('{');
-      const lastBrace = response.lastIndexOf('}');
-      if (firstBrace !== -1) {
-        if (lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonStr = response.substring(firstBrace, lastBrace + 1);
-        } else {
-          jsonStr = response.substring(firstBrace);
-        }
-      }
-    }
-    return JSON.parse(jsonrepair(jsonStr.trim()));
+    return extractJSON(response) as { name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> };
   } catch (e: any) {
     console.error("Failed to parse vibe forge JSON:", response);
     console.error("Parse error:", e);
@@ -1043,22 +1021,7 @@ ${slotsPrompt}`;
   );
 
   try {
-    let jsonStr = responseText;
-    const match = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (match) {
-      jsonStr = match[1];
-    } else {
-      const firstBrace = responseText.indexOf('{');
-      const lastBrace = responseText.lastIndexOf('}');
-      if (firstBrace !== -1) {
-        if (lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonStr = responseText.substring(firstBrace, lastBrace + 1);
-        } else {
-          jsonStr = responseText.substring(firstBrace);
-        }
-      }
-    }
-    return JSON.parse(jsonrepair(jsonStr.trim()));
+    return extractJSON(responseText) as Record<string, string>;
   } catch (e: any) {
     console.error("Failed to parse auto-fill response:", responseText);
     console.error("Parse error:", e);
@@ -1143,22 +1106,7 @@ ${JSON.stringify(card, null, 2)}`;
   const response = await callAIProvider(provider, keys, prompt, "You are a music supervisor and character analyst.", true, 500, model);
   
   try {
-    let jsonStr = response;
-    const match = response.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (match) {
-      jsonStr = match[1];
-    } else {
-      const firstBrace = response.indexOf('{');
-      const lastBrace = response.lastIndexOf('}');
-      if (firstBrace !== -1) {
-        if (lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonStr = response.substring(firstBrace, lastBrace + 1);
-        } else {
-          jsonStr = response.substring(firstBrace);
-        }
-      }
-    }
-    const parsed = JSON.parse(jsonrepair(jsonStr.trim()));
+    const parsed = extractJSON(response) as any;
     return {
       title: parsed.title || "Unknown Title",
       artist: parsed.artist || "Unknown Artist",
