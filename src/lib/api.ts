@@ -218,12 +218,16 @@ async function callAIProvider(
   model?: string
 ): Promise<string> {
   try {
+    const finalSystemPrompt = jsonMode 
+      ? `${systemPrompt}\n\nIMPORTANT: You must respond ONLY with valid JSON. Do not include any conversational text, markdown formatting, or explanations outside the JSON object. Ensure all strings are properly escaped.`
+      : systemPrompt;
+
     switch (provider) {
       case "gemini": {
         const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
         const config: any = {
           maxOutputTokens: maxTokens,
-          systemInstruction: systemPrompt,
+          systemInstruction: finalSystemPrompt,
         };
         if (jsonMode) {
           config.responseMimeType = "application/json";
@@ -247,7 +251,7 @@ async function callAIProvider(
           body: JSON.stringify({
             model: model || "claude-3-opus-20240229",
             max_tokens: maxTokens,
-            system: systemPrompt,
+            system: finalSystemPrompt,
             messages: [{ role: "user", content: prompt }],
           }),
         });
@@ -264,7 +268,7 @@ async function callAIProvider(
           model: model || "gpt-4-turbo-preview",
           max_completion_tokens: maxTokens,
           messages: [
-            { role: "system", content: systemPrompt },
+            { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
           ],
         };
@@ -296,7 +300,7 @@ async function callAIProvider(
           model: model || "anthropic/claude-3-opus",
           max_completion_tokens: maxTokens,
           messages: [
-            { role: "system", content: systemPrompt },
+            { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
           ],
         };
@@ -331,7 +335,7 @@ async function callAIProvider(
           const body: any = {
             model: model || "default",
             messages: [
-              { role: "system", content: systemPrompt },
+              { role: "system", content: finalSystemPrompt },
               { role: "user", content: prompt }
             ],
           };
@@ -541,6 +545,7 @@ ${detailsStr}
 
 OUTPUT FORMAT:
 You MUST output ONLY valid JSON matching this structure. Do not include any other text, explanations, or markdown formatting outside the JSON object.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
 {
   "name": "string",
   "description": "string",
@@ -566,9 +571,10 @@ You MUST output ONLY valid JSON matching this structure. Do not include any othe
         }
       }
       return JSON.parse(jsonStr.trim());
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
-      throw new Error("AI did not return valid JSON.");
+      console.error("Parse error:", e);
+      throw new Error(`AI did not return valid JSON: ${e.message}`);
     }
   };
 
@@ -697,8 +703,9 @@ ${templateExample}`;
       }
       
       return parsed;
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
+      console.error("Parse error:", e);
       return [
         { name: "Background", description: "The character's history and lore." },
         { name: "Scenario", description: "The current situation or dynamic." }
@@ -846,7 +853,8 @@ Look for characters, important objects, artifacts, locations, factions, and thei
 CRITICAL: You must create an ACTUAL relationship map. Do not just list entities. You must infer and create logical links between the characters, objects, and locations based on their descriptions and concepts.
 Also look for "pipeline" progressions (e.g., Character A was an NPC in Character B's story, then got their own card).${cardsContext}
 
-Return ONLY a valid JSON object with two arrays: "nodes" and "links".
+Return ONLY a valid JSON object with two arrays: "nodes" and "links". Do not include any markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings.
 - "nodes" should be an array of objects: { "id": "unique_id", "name": "Entity Name", "group": "character" | "object" | "location" | "faction" | "archetype", "description": "Short description" }
 - "links" should be an array of objects: { "source": "source_node_id", "target": "target_node_id", "type": "relationship" or "pipeline", "label": "Short description of link (e.g., 'Wields', 'Located In', 'Rivals', 'Allies With', 'Created')" }
 
@@ -870,8 +878,9 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
         }
       }
       return JSON.parse(jsonStr.trim());
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
+      console.error("Parse error:", e);
       return { nodes: [], links: [] };
     }
   };
@@ -908,7 +917,8 @@ export async function vibeForgeCard(
 "${vibePrompt}"
 
 Please generate a fitting Name, a Core Concept/Archetype, a First Message Idea, and appropriate content for the following character fields.
-Return ONLY a JSON object with the following structure:
+Return ONLY a valid JSON object with the following structure. Do not include any markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
 {
   "name": "Generated Name",
   "concept": "Generated Core Concept",
@@ -953,9 +963,10 @@ ${slotsPrompt}
       }
     }
     return JSON.parse(jsonStr.trim());
-  } catch (e) {
+  } catch (e: any) {
     console.error("Failed to parse vibe forge JSON:", response);
-    throw new Error("Failed to parse generated character details. Please try again.");
+    console.error("Parse error:", e);
+    throw new Error(`Failed to parse generated character details: ${e.message}`);
   }
 }
 
@@ -980,7 +991,8 @@ export async function autoFillSlots(
   let prompt = `You are an expert character creator. I am building a character named "${name}" with the core concept/archetype of "${concept}".
 
 Please generate appropriate content for the following character fields.
-Return ONLY a JSON object where the keys are the exact field names and the values are the generated content.
+Return ONLY a valid JSON object where the keys are the exact field names and the values are the generated content. Do not include any markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
 ${vibePrompt ? `\nADDITIONAL INSTRUCTIONS / VIBE FOR THESE TRAITS:\n"${vibePrompt}"\n` : ""}
 ${filledContext ? `\nALREADY FILLED DETAILS (use these for context and consistency):\n${filledContext}\n` : ""}
 FIELDS TO FILL:
@@ -1017,8 +1029,9 @@ ${slotsPrompt}`;
       }
     }
     return JSON.parse(jsonStr.trim());
-  } catch (e) {
-    console.error("Failed to parse auto-fill response", e);
+  } catch (e: any) {
+    console.error("Failed to parse auto-fill response:", responseText);
+    console.error("Parse error:", e);
     return {};
   }
 }
@@ -1086,7 +1099,8 @@ export async function suggestThemeSong(
   model?: string
 ): Promise<{ title: string; artist: string; reason: string }> {
   const prompt = `Based on the following character card, suggest a fitting theme song for this character.
-Return ONLY a valid JSON object with the following structure, and no markdown formatting or other text:
+Return ONLY a valid JSON object with the following structure, and no markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings.
 {
   "title": "Song Title",
   "artist": "Artist Name",
