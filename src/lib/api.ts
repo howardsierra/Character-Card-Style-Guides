@@ -26,9 +26,9 @@ function isUnsupportedMaxCompletionError(errMsg: string): boolean {
     (normalized.includes("unsupported") || normalized.includes("unknown") || normalized.includes("invalid"));
 }
 
-function findBalancedJSON(text: string): string | null {
+function findBalancedJSON(text: string, startFrom: number = 0): { value: string; endIndex: number } | null {
   const openers = new Set(['{', '[']);
-  for (let i = 0; i < text.length; i++) {
+  for (let i = startFrom; i < text.length; i++) {
     const ch = text[i];
     if (!openers.has(ch)) continue;
 
@@ -45,11 +45,11 @@ function findBalancedJSON(text: string): string | null {
       if (c === '{' || c === '[') depth++;
       if (c === '}' || c === ']') depth--;
       if (depth === 0) {
-        return text.substring(i, j + 1);
+        return { value: text.substring(i, j + 1), endIndex: j + 1 };
       }
     }
     // Braces never balanced — return from opener to end so jsonrepair can attempt to fix truncated JSON
-    return text.substring(i);
+    return { value: text.substring(i), endIndex: text.length };
   }
   return null;
 }
@@ -60,18 +60,21 @@ function extractJSON(text: string): unknown {
   if (codeBlockMatch) {
     try {
       return JSON.parse(jsonrepair(codeBlockMatch[1].trim()));
-    } catch {
+    } catch (e) {
       // Fall through to strategy 2
     }
   }
 
-  // Strategy 2: Find first balanced JSON structure (skips prose braces)
-  const balanced = findBalancedJSON(text);
-  if (balanced) {
+  // Strategy 2: Try each balanced JSON structure in order (skips prose braces like {from your idea})
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const result = findBalancedJSON(text, searchFrom);
+    if (!result) break;
     try {
-      return JSON.parse(jsonrepair(balanced.trim()));
-    } catch {
-      // Fall through to strategy 3
+      return JSON.parse(jsonrepair(result.value.trim()));
+    } catch (e) {
+      searchFrom = result.endIndex;
+      continue;
     }
   }
 
@@ -273,9 +276,9 @@ async function callAIProvider(
 ): Promise<string> {
   try {
     let providerMaxTokens = maxTokens;
-    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 8192);
+    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 16384);
     else if (provider === "openai") providerMaxTokens = Math.min(maxTokens, 16384);
-    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 8192);
+    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 16384);
 
     const finalSystemPrompt = jsonMode 
       ? `${systemPrompt}\n\nIMPORTANT: You must respond ONLY with valid JSON. Do not include any conversational text, markdown formatting, or explanations outside the JSON object. Ensure all strings are properly escaped.`
@@ -630,7 +633,7 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    8192,
+    16384,
     model
   );
   return parseResponse(responseText);
@@ -961,7 +964,7 @@ ${slotsPrompt}
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    8192,
+    16384,
     model
   );
   
