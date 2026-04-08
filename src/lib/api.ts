@@ -347,68 +347,106 @@ async function callAIProvider(
         return data.content[0].text;
       }
       case "openai": {
-        const body: any = {
-          model: model || "gpt-4-turbo-preview",
-          max_completion_tokens: providerMaxTokens,
-          messages: [
-            { role: "system", content: finalSystemPrompt },
-            { role: "user", content: prompt }
-          ],
+        const makeOpenAIBody = (useMaxCompletionTokens: boolean) => {
+          const body: any = {
+            model: model || "gpt-4-turbo-preview",
+            messages: [
+              { role: "system", content: finalSystemPrompt },
+              { role: "user", content: prompt }
+            ],
+          };
+          if (useMaxCompletionTokens) {
+            body.max_completion_tokens = providerMaxTokens;
+          } else {
+            body.max_tokens = providerMaxTokens;
+          }
+          if (jsonMode) {
+            body.response_format = { type: "json_object" };
+          }
+          return body;
         };
-        if (jsonMode) {
-          body.response_format = { type: "json_object" };
+
+        const sendOpenAIRequest = async (useMaxCompletionTokens: boolean) => {
+          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${keys.openai}`,
+            },
+            body: JSON.stringify(makeOpenAIBody(useMaxCompletionTokens)),
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            const errMsg = errData.error?.message || errData.message || res.statusText;
+            return { ok: false as const, errMsg };
+          }
+          const data = await res.json();
+          return { ok: true as const, data };
+        };
+
+        let openaiResult = await sendOpenAIRequest(true);
+        if (!openaiResult.ok && isUnsupportedMaxCompletionError(openaiResult.errMsg)) {
+          openaiResult = await sendOpenAIRequest(false);
         }
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openai}`,
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error?.message || errData.message || res.statusText;
-          throw new Error(`OpenAI API error: ${errMsg}`);
+        if (!openaiResult.ok) {
+          throw new Error(`OpenAI API error: ${openaiResult.errMsg}`);
         }
-        const data = await res.json();
-        const choice = data.choices?.[0];
-        if (!choice) {
-          throw new Error(`OpenAI returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        const openaiChoice = openaiResult.data.choices?.[0];
+        if (!openaiChoice) {
+          throw new Error(`OpenAI returned no choices. Response: ${JSON.stringify(openaiResult.data).substring(0, 200)}`);
         }
-        return choice.message?.content || choice.text || "";
+        return openaiChoice.message?.content || openaiChoice.text || "";
       }
       case "openrouter": {
-        const body: any = {
-          model: model || "anthropic/claude-3-opus",
-          max_completion_tokens: providerMaxTokens,
-          messages: [
-            { role: "system", content: finalSystemPrompt },
-            { role: "user", content: prompt }
-          ],
+        const makeOpenRouterBody = (useMaxCompletionTokens: boolean) => {
+          const body: any = {
+            model: model || "anthropic/claude-3-opus",
+            messages: [
+              { role: "system", content: finalSystemPrompt },
+              { role: "user", content: prompt }
+            ],
+          };
+          if (useMaxCompletionTokens) {
+            body.max_completion_tokens = providerMaxTokens;
+          } else {
+            body.max_tokens = providerMaxTokens;
+          }
+          return body;
         };
+
         // OpenRouter models vary in JSON mode support, rely on prompt + regex parsing
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openrouter}`,
-            "HTTP-Referer": window.location.href,
-            "X-Title": "SillyTavern Style Guide Generator",
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error?.message || errData.message || res.statusText;
-          throw new Error(`OpenRouter API error: ${errMsg}`);
+        const sendOpenRouterRequest = async (useMaxCompletionTokens: boolean) => {
+          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${keys.openrouter}`,
+              "HTTP-Referer": window.location.href,
+              "X-Title": "SillyTavern Style Guide Generator",
+            },
+            body: JSON.stringify(makeOpenRouterBody(useMaxCompletionTokens)),
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            const errMsg = errData.error?.message || errData.message || res.statusText;
+            return { ok: false as const, errMsg };
+          }
+          const data = await res.json();
+          return { ok: true as const, data };
+        };
+
+        let openrouterResult = await sendOpenRouterRequest(true);
+        if (!openrouterResult.ok && isUnsupportedMaxCompletionError(openrouterResult.errMsg)) {
+          openrouterResult = await sendOpenRouterRequest(false);
         }
-        const data = await res.json();
-        const choice = data.choices?.[0];
-        if (!choice) {
-          throw new Error(`OpenRouter returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        if (!openrouterResult.ok) {
+          throw new Error(`OpenRouter API error: ${openrouterResult.errMsg}`);
         }
-        return choice.message?.content || choice.text || "";
+        const openrouterChoice = openrouterResult.data.choices?.[0];
+        if (!openrouterChoice) {
+          throw new Error(`OpenRouter returned no choices. Response: ${JSON.stringify(openrouterResult.data).substring(0, 200)}`);
+        }
+        return openrouterChoice.message?.content || openrouterChoice.text || "";
       }
       case "custom": {
         const capabilityKey = keys.customEndpoint;
