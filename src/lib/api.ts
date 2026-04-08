@@ -276,9 +276,9 @@ async function callAIProvider(
 ): Promise<string> {
   try {
     let providerMaxTokens = maxTokens;
-    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 8192);
+    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 16384);
     else if (provider === "openai") providerMaxTokens = Math.min(maxTokens, 16384);
-    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 8192);
+    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 16384);
 
     const finalSystemPrompt = jsonMode 
       ? `${systemPrompt}\n\nIMPORTANT: You must respond ONLY with valid JSON. Do not include any conversational text, markdown formatting, or explanations outside the JSON object. Ensure all strings are properly escaped.`
@@ -633,7 +633,7 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    8192,
+    16384,
     model
   );
   return parseResponse(responseText);
@@ -964,7 +964,7 @@ ${slotsPrompt}
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    8192,
+    16384,
     model
   );
   
