@@ -78,7 +78,28 @@ function extractJSON(text: string): unknown {
     }
   }
 
-  // Strategy 3: Try the raw text with jsonrepair as last resort
+  // Strategy 3: First opener to last closer — handles unescaped quotes in string values
+  // that cause the balanced scanner to close prematurely
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(jsonrepair(text.substring(firstBrace, lastBrace + 1).trim()));
+    } catch (e) {
+      // Fall through
+    }
+  }
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    try {
+      return JSON.parse(jsonrepair(text.substring(firstBracket, lastBracket + 1).trim()));
+    } catch (e) {
+      // Fall through
+    }
+  }
+
+  // Strategy 4: Try the raw text with jsonrepair as last resort
   return JSON.parse(jsonrepair(text.trim()));
 }
 
