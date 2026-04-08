@@ -572,8 +572,12 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
         // Fallback: try to find the first '{' and last '}'
         const firstBrace = text.indexOf('{');
         const lastBrace = text.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonStr = text.substring(firstBrace, lastBrace + 1);
+        if (firstBrace !== -1) {
+          if (lastBrace !== -1 && lastBrace > firstBrace) {
+            jsonStr = text.substring(firstBrace, lastBrace + 1);
+          } else {
+            jsonStr = text.substring(firstBrace);
+          }
         }
       }
       return JSON.parse(jsonrepair(jsonStr.trim()));
@@ -693,10 +697,18 @@ ${templateExample}`;
         const lastBrace = text.lastIndexOf('}');
         
         // If it looks like an array
-        if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-          jsonStr = text.substring(firstBracket, lastBracket + 1);
-        } else if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonStr = text.substring(firstBrace, lastBrace + 1);
+        if (firstBracket !== -1) {
+          if (lastBracket !== -1 && lastBracket > firstBracket) {
+            jsonStr = text.substring(firstBracket, lastBracket + 1);
+          } else {
+            jsonStr = text.substring(firstBracket);
+          }
+        } else if (firstBrace !== -1) {
+          if (lastBrace !== -1 && lastBrace > firstBrace) {
+            jsonStr = text.substring(firstBrace, lastBrace + 1);
+          } else {
+            jsonStr = text.substring(firstBrace);
+          }
         }
       }
       
@@ -879,8 +891,12 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
       } else {
         const firstBrace = text.indexOf('{');
         const lastBrace = text.lastIndexOf('}');
-        if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-          jsonStr = text.substring(firstBrace, lastBrace + 1);
+        if (firstBrace !== -1) {
+          if (lastBrace !== -1 && lastBrace > firstBrace) {
+            jsonStr = text.substring(firstBrace, lastBrace + 1);
+          } else {
+            jsonStr = text.substring(firstBrace);
+          }
         }
       }
       return JSON.parse(jsonrepair(jsonStr.trim()));
@@ -964,8 +980,12 @@ ${slotsPrompt}
     } else {
       const firstBrace = response.indexOf('{');
       const lastBrace = response.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        jsonStr = response.substring(firstBrace, lastBrace + 1);
+      if (firstBrace !== -1) {
+        if (lastBrace !== -1 && lastBrace > firstBrace) {
+          jsonStr = response.substring(firstBrace, lastBrace + 1);
+        } else {
+          jsonStr = response.substring(firstBrace);
+        }
       }
     }
     return JSON.parse(jsonrepair(jsonStr.trim()));
@@ -1030,8 +1050,12 @@ ${slotsPrompt}`;
     } else {
       const firstBrace = responseText.indexOf('{');
       const lastBrace = responseText.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        jsonStr = responseText.substring(firstBrace, lastBrace + 1);
+      if (firstBrace !== -1) {
+        if (lastBrace !== -1 && lastBrace > firstBrace) {
+          jsonStr = responseText.substring(firstBrace, lastBrace + 1);
+        } else {
+          jsonStr = responseText.substring(firstBrace);
+        }
       }
     }
     return JSON.parse(jsonrepair(jsonStr.trim()));
@@ -1126,8 +1150,12 @@ ${JSON.stringify(card, null, 2)}`;
     } else {
       const firstBrace = response.indexOf('{');
       const lastBrace = response.lastIndexOf('}');
-      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-        jsonStr = response.substring(firstBrace, lastBrace + 1);
+      if (firstBrace !== -1) {
+        if (lastBrace !== -1 && lastBrace > firstBrace) {
+          jsonStr = response.substring(firstBrace, lastBrace + 1);
+        } else {
+          jsonStr = response.substring(firstBrace);
+        }
       }
     }
     const parsed = JSON.parse(jsonrepair(jsonStr.trim()));
