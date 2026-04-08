@@ -18,6 +18,7 @@ import { toPng } from "html-to-image";
 import UniverseMap from "./components/UniverseMap";
 import { ModelSelector } from "./components/ModelSelector";
 import { useHistory } from "./hooks/useHistory";
+import localforage from "localforage";
 
 type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "script" | "image" | "settings";
 const APP_AUTOSAVE_KEY = "st_app_autosave_v1";
@@ -222,77 +223,129 @@ export default function App() {
     const savedProvider = localStorage.getItem("st_style_provider");
     if (savedProvider) setProvider(savedProvider as AIProvider);
 
-    const savedDraft = localStorage.getItem("st_forge_draft");
-    if (savedDraft) {
-      try {
-        const draft = JSON.parse(savedDraft);
-        if (draft.forgeName) setForgeName(draft.forgeName);
-        if (draft.forgeConcept) setForgeConcept(draft.forgeConcept);
-        if (draft.forgeSlots) setForgeSlots(draft.forgeSlots);
-        if (draft.forgeSelectedGuide) setForgeSelectedGuide(draft.forgeSelectedGuide);
-        if (draft.forgeSelectedTemplate) setForgeSelectedTemplate(draft.forgeSelectedTemplate);
-        if (draft.forgeFirstMessageIdea) setForgeFirstMessageIdea(draft.forgeFirstMessageIdea);
-      } catch (e) {
-        console.error("Failed to load draft", e);
+    localforage.getItem("st_forge_draft").then((savedDraftData: any) => {
+      if (savedDraftData) {
+        if (savedDraftData.forgeName) setForgeName(savedDraftData.forgeName);
+        if (savedDraftData.forgeConcept) setForgeConcept(savedDraftData.forgeConcept);
+        if (savedDraftData.forgeSlots) setForgeSlots(savedDraftData.forgeSlots);
+        if (savedDraftData.forgeSelectedGuide) setForgeSelectedGuide(savedDraftData.forgeSelectedGuide);
+        if (savedDraftData.forgeSelectedTemplate) setForgeSelectedTemplate(savedDraftData.forgeSelectedTemplate);
+        if (savedDraftData.forgeFirstMessageIdea) setForgeFirstMessageIdea(savedDraftData.forgeFirstMessageIdea);
+      } else {
+        const oldData = localStorage.getItem("st_forge_draft");
+        if (oldData) {
+          try {
+            const draft = JSON.parse(oldData);
+            if (draft.forgeName) setForgeName(draft.forgeName);
+            if (draft.forgeConcept) setForgeConcept(draft.forgeConcept);
+            if (draft.forgeSlots) setForgeSlots(draft.forgeSlots);
+            if (draft.forgeSelectedGuide) setForgeSelectedGuide(draft.forgeSelectedGuide);
+            if (draft.forgeSelectedTemplate) setForgeSelectedTemplate(draft.forgeSelectedTemplate);
+            if (draft.forgeFirstMessageIdea) setForgeFirstMessageIdea(draft.forgeFirstMessageIdea);
+            localforage.setItem("st_forge_draft", draft);
+          } catch (e) {
+            console.error("Failed to load draft", e);
+          }
+        }
       }
-    }
+    });
 
-    const savedGuides = localStorage.getItem("st_style_guides");
-    if (savedGuides) {
-      setGuides(JSON.parse(savedGuides));
-    } else {
-      setGuides([{
-        id: "default-elysiansuns",
-        title: "ElysianSuns Complete Style Guide v6.0",
-        content: DEFAULT_GUIDE_CONTENT,
-        date: new Date().toISOString(),
-        versions: []
-      }]);
-    }
-
-    const savedTemplates = localStorage.getItem("st_custom_templates");
-    if (savedTemplates) {
-      setCustomTemplates(JSON.parse(savedTemplates));
-    }
-
-    const savedCardsData = localStorage.getItem("st_saved_cards");
-    if (savedCardsData) {
-      setSavedCards(JSON.parse(savedCardsData));
-    }
-
-    const savedAppState = localStorage.getItem(APP_AUTOSAVE_KEY);
-    if (savedAppState) {
-      try {
-        const parsed = JSON.parse(savedAppState);
-        if (parsed.view) setView(parsed.view);
-        if (Array.isArray(parsed.cards)) setCards(parsed.cards);
-        if (typeof parsed.currentGuide === "string" || parsed.currentGuide === null) setCurrentGuide(parsed.currentGuide);
-        if (typeof parsed.currentGuideId === "string" || parsed.currentGuideId === null) setCurrentGuideId(parsed.currentGuideId);
-        if (typeof parsed.isEditingGuide === "boolean") setIsEditingGuide(parsed.isEditingGuide);
-        if (typeof parsed.editedGuideContent === "string") setEditedGuideContent(parsed.editedGuideContent);
-        if (typeof parsed.showVersions === "boolean") setShowVersions(parsed.showVersions);
-        if (Array.isArray(parsed.selectedGuides)) setSelectedGuides(new Set(parsed.selectedGuides));
-
-        if (parsed.universeData) setUniverseData(parsed.universeData);
-        if (typeof parsed.universeSelectedGuide === "string") setUniverseSelectedGuide(parsed.universeSelectedGuide);
-        if (Array.isArray(parsed.universeSelectedCards)) setUniverseSelectedCards(new Set(parsed.universeSelectedCards));
-
-        if (typeof parsed.showSavedCards === "boolean") setShowSavedCards(parsed.showSavedCards);
-        if (typeof parsed.imagePrompt === "string") setImagePrompt(parsed.imagePrompt);
-        if (typeof parsed.characterImage === "string") setCharacterImage(parsed.characterImage);
-        if (typeof parsed.studioImagePrompt === "string") setStudioImagePrompt(parsed.studioImagePrompt);
-        if (typeof parsed.studioCharacterImage === "string") setStudioCharacterImage(parsed.studioCharacterImage);
-        if (typeof parsed.studioSelectedCard === "string") setStudioSelectedCard(parsed.studioSelectedCard);
-        if (typeof parsed.imageAspectRatio === "string") setImageAspectRatio(parsed.imageAspectRatio);
-        if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
-        if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
-        if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
-      } catch (e) {
-        console.error("Failed to load app autosave", e);
+    localforage.getItem("st_style_guides").then((savedGuidesData: any) => {
+      if (savedGuidesData) {
+        setGuides(savedGuidesData);
+      } else {
+        const oldData = localStorage.getItem("st_style_guides");
+        if (oldData) {
+          try {
+            const parsed = JSON.parse(oldData);
+            setGuides(parsed);
+            localforage.setItem("st_style_guides", parsed);
+          } catch (e) {}
+        } else {
+          setGuides([{
+            id: "default-elysiansuns",
+            title: "ElysianSuns Complete Style Guide v6.0",
+            content: DEFAULT_GUIDE_CONTENT,
+            date: new Date().toISOString(),
+            versions: []
+          }]);
+        }
       }
-    }
+    });
 
-    setHasHydratedAutosave(true);
+    localforage.getItem("st_custom_templates").then((savedTemplatesData: any) => {
+      if (savedTemplatesData) {
+        setCustomTemplates(savedTemplatesData);
+      } else {
+        const oldData = localStorage.getItem("st_custom_templates");
+        if (oldData) {
+          try {
+            const parsed = JSON.parse(oldData);
+            setCustomTemplates(parsed);
+            localforage.setItem("st_custom_templates", parsed);
+          } catch (e) {}
+        }
+      }
+    });
+
+    localforage.getItem("st_saved_cards").then((savedCardsData: any) => {
+      if (savedCardsData) {
+        setSavedCards(savedCardsData);
+      } else {
+        const oldData = localStorage.getItem("st_saved_cards");
+        if (oldData) {
+          try {
+            const parsed = JSON.parse(oldData);
+            setSavedCards(parsed);
+            localforage.setItem("st_saved_cards", parsed);
+          } catch (e) {}
+        }
+      }
+    });
+
+    localforage.getItem(APP_AUTOSAVE_KEY).then((savedAppState: any) => {
+      let parsed = savedAppState;
+      if (!parsed) {
+        const oldData = localStorage.getItem(APP_AUTOSAVE_KEY);
+        if (oldData) {
+          try {
+            parsed = JSON.parse(oldData);
+            localforage.setItem(APP_AUTOSAVE_KEY, parsed);
+          } catch (e) {}
+        }
+      }
+
+      if (parsed) {
+        try {
+          if (parsed.view) setView(parsed.view);
+          if (Array.isArray(parsed.cards)) setCards(parsed.cards);
+          if (typeof parsed.currentGuide === "string" || parsed.currentGuide === null) setCurrentGuide(parsed.currentGuide);
+          if (typeof parsed.currentGuideId === "string" || parsed.currentGuideId === null) setCurrentGuideId(parsed.currentGuideId);
+          if (typeof parsed.isEditingGuide === "boolean") setIsEditingGuide(parsed.isEditingGuide);
+          if (typeof parsed.editedGuideContent === "string") setEditedGuideContent(parsed.editedGuideContent);
+          if (typeof parsed.showVersions === "boolean") setShowVersions(parsed.showVersions);
+          if (Array.isArray(parsed.selectedGuides)) setSelectedGuides(new Set(parsed.selectedGuides));
+
+          if (parsed.universeData) setUniverseData(parsed.universeData);
+          if (typeof parsed.universeSelectedGuide === "string") setUniverseSelectedGuide(parsed.universeSelectedGuide);
+          if (Array.isArray(parsed.universeSelectedCards)) setUniverseSelectedCards(new Set(parsed.universeSelectedCards));
+
+          if (typeof parsed.showSavedCards === "boolean") setShowSavedCards(parsed.showSavedCards);
+          if (typeof parsed.imagePrompt === "string") setImagePrompt(parsed.imagePrompt);
+          if (typeof parsed.characterImage === "string") setCharacterImage(parsed.characterImage);
+          if (typeof parsed.studioImagePrompt === "string") setStudioImagePrompt(parsed.studioImagePrompt);
+          if (typeof parsed.studioCharacterImage === "string") setStudioCharacterImage(parsed.studioCharacterImage);
+          if (typeof parsed.studioSelectedCard === "string") setStudioSelectedCard(parsed.studioSelectedCard);
+          if (typeof parsed.imageAspectRatio === "string") setImageAspectRatio(parsed.imageAspectRatio);
+          if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
+          if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
+          if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
+        } catch (e) {
+          console.error("Failed to load app autosave", e);
+        }
+      }
+      setHasHydratedAutosave(true);
+    });
   }, []);
 
   // Save keys
@@ -313,7 +366,7 @@ export default function App() {
   }, [provider]);
 
   useEffect(() => {
-    localStorage.setItem("st_style_guides", JSON.stringify(guides));
+    localforage.setItem("st_style_guides", guides).catch(e => console.error(e));
   }, [guides]);
 
   // Save drafts
@@ -326,7 +379,7 @@ export default function App() {
       forgeSelectedTemplate,
       forgeFirstMessageIdea
     };
-    localStorage.setItem("st_forge_draft", JSON.stringify(draft));
+    localforage.setItem("st_forge_draft", draft).catch(e => console.error(e));
   }, [forgeName, forgeConcept, forgeSlots, forgeSelectedGuide, forgeSelectedTemplate, forgeFirstMessageIdea]);
 
   useEffect(() => {
@@ -355,7 +408,7 @@ export default function App() {
       forgedCard,
       forgeBaseCard
     };
-    localStorage.setItem(APP_AUTOSAVE_KEY, JSON.stringify(appState));
+    localforage.setItem(APP_AUTOSAVE_KEY, appState).catch(e => console.error(e));
   }, [
     hasHydratedAutosave,
     view,
@@ -555,13 +608,23 @@ export default function App() {
     e.target.value = "";
   };
 
-  const openTemplateEditor = (templateId?: string) => {
-    const draftStr = localStorage.getItem("st_template_draft");
+  const openTemplateEditor = async (templateId?: string) => {
+    let draftStr: any = await localforage.getItem("st_template_draft");
+    if (!draftStr) {
+      const oldDraft = localStorage.getItem("st_template_draft");
+      if (oldDraft) {
+        try {
+          draftStr = JSON.parse(oldDraft);
+          localforage.setItem("st_template_draft", draftStr);
+        } catch (e) {}
+      }
+    }
+
     let useDraft = false;
     if (draftStr) {
       if (confirm("You have an unsaved template draft. Would you like to restore it?")) {
         try {
-          const draft = JSON.parse(draftStr);
+          const draft = draftStr;
           setEditingTemplateId(draft.id);
           setEditingTemplateName(draft.name);
           setEditingTemplateContent(draft.content);
@@ -571,7 +634,7 @@ export default function App() {
           console.error("Failed to parse template draft", e);
         }
       } else {
-        localStorage.removeItem("st_template_draft");
+        localforage.removeItem("st_template_draft");
       }
     }
 
@@ -616,7 +679,7 @@ export default function App() {
       content: newContent,
       example: newExample
     };
-    localStorage.setItem("st_template_draft", JSON.stringify(draft));
+    localforage.setItem("st_template_draft", draft).catch(e => console.error(e));
   };
 
   const saveTemplate = () => {
@@ -643,7 +706,7 @@ export default function App() {
       setCustomTemplates(prev => [...prev, newTemplate]);
       setForgeSelectedTemplate(newTemplate.id);
     }
-    localStorage.removeItem("st_template_draft");
+    localforage.removeItem("st_template_draft");
     setIsTemplateEditorOpen(false);
   };
 
@@ -907,11 +970,11 @@ export default function App() {
   };
 
   useEffect(() => {
-    localStorage.setItem("st_custom_templates", JSON.stringify(customTemplates));
+    localforage.setItem("st_custom_templates", customTemplates).catch(e => console.error(e));
   }, [customTemplates]);
 
   useEffect(() => {
-    localStorage.setItem("st_saved_cards", JSON.stringify(savedCards));
+    localforage.setItem("st_saved_cards", savedCards).catch(e => console.error(e));
   }, [savedCards]);
 
   const lastExtractedRef = useRef<{ guide: string, template: string }>({ guide: "", template: "" });
