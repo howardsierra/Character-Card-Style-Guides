@@ -182,8 +182,6 @@ export default function App() {
   
   const [imagePrompt, setImagePrompt] = useState("");
   const [isGeneratingImagePrompt, setIsGeneratingImagePrompt] = useState(false);
-  const [characterImage, setCharacterImage] = useState("");
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   
   const [suggestedSong, setSuggestedSong] = useState<{title: string, artist: string, reason: string} | null>(null);
   const [isSuggestingSong, setIsSuggestingSong] = useState(false);
@@ -332,7 +330,6 @@ export default function App() {
 
           if (typeof parsed.showSavedCards === "boolean") setShowSavedCards(parsed.showSavedCards);
           if (typeof parsed.imagePrompt === "string") setImagePrompt(parsed.imagePrompt);
-          if (typeof parsed.characterImage === "string") setCharacterImage(parsed.characterImage);
           if (typeof parsed.studioImagePrompt === "string") setStudioImagePrompt(parsed.studioImagePrompt);
           if (typeof parsed.studioCharacterImage === "string") setStudioCharacterImage(parsed.studioCharacterImage);
           if (typeof parsed.studioSelectedCard === "string") setStudioSelectedCard(parsed.studioSelectedCard);
@@ -398,7 +395,6 @@ export default function App() {
       universeSelectedCards: Array.from(universeSelectedCards),
       showSavedCards,
       imagePrompt,
-      characterImage,
       studioImagePrompt,
       studioCharacterImage,
       studioSelectedCard,
@@ -424,7 +420,6 @@ export default function App() {
     universeSelectedCards,
     showSavedCards,
     imagePrompt,
-    characterImage,
     studioImagePrompt,
     studioCharacterImage,
     studioSelectedCard,
@@ -1187,7 +1182,7 @@ export default function App() {
     setIsGeneratingImagePrompt(true);
     try {
       const { generateImagePrompt } = await import("./lib/api");
-      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_image_prompt");
       const details = JSON.stringify(forgedCard, null, 2);
       const prompt = await generateImagePrompt(currentProvider, apiKeys, details, currentModel);
       setImagePrompt(prompt);
@@ -1213,48 +1208,6 @@ export default function App() {
     } finally {
       setIsSuggestingSong(false);
     }
-  };
-
-  const handleGenerateImage = async () => {
-    if (!imagePrompt) return;
-    setIsGeneratingImage(true);
-    try {
-      const { generateCharacterImage } = await import("./lib/api");
-      const { currentProvider, currentModel } = getProviderAndModel("forge_image");
-      
-      if (currentProvider !== "gemini") {
-        alert("Image generation is currently only supported with Gemini models.");
-        setIsGeneratingImage(false);
-        return;
-      }
-
-      // Default to gemini-3.1-flash-image-preview if no model is selected or if a text model is selected
-      let modelToUse = currentModel;
-      if (!modelToUse || !modelToUse.includes("image")) {
-        modelToUse = "gemini-3.1-flash-image-preview";
-      }
-
-      const imageBase64 = await generateCharacterImage(apiKeys, imagePrompt, modelToUse, imageAspectRatio, imageSize, imageStyle);
-      setCharacterImage(imageBase64);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to generate image. Please check your Gemini API key.");
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
-
-  const handleForgeImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const result = event.target?.result as string;
-      setCharacterImage(result);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
   };
 
   const handleStudioReferenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1549,11 +1502,6 @@ export default function App() {
         extensions: {}
       }
     };
-
-    if (characterImage) {
-      // Add image to the card data if available
-      cardData.data.image = characterImage;
-    }
     
     const blob = new Blob([JSON.stringify(cardData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1570,9 +1518,6 @@ export default function App() {
     if (!forgedCard) return;
     
     const cardToSave: any = { ...forgedCard };
-    if (characterImage) {
-      cardToSave.image = characterImage;
-    }
 
     const newSavedCard: SavedCard = {
       id: Date.now().toString(),
@@ -2664,15 +2609,13 @@ export default function App() {
                                 </h4>
                                 <div className="flex justify-start sm:justify-end">
                                   <ModelSelector
-                                    sectionId="forge_image"
+                                    sectionId="forge_image_prompt"
                                     globalProvider={provider}
                                     globalModels={apiModels}
                                     sectionConfigs={sectionConfigs}
                                     setSectionConfigs={setSectionConfigs}
                                     availableModels={availableModels}
                                     isFetchingModels={isFetchingModels}
-                                    allowedProviders={["gemini"]}
-                                    filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
                                   />
                                 </div>
                               </div>
@@ -2696,116 +2639,11 @@ export default function App() {
                                       {isGeneratingImagePrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
                                       Generate Prompt
                                     </Button>
-                                    <Button 
-                                      onClick={handleGenerateImage} 
-                                      disabled={isGeneratingImage || !imagePrompt}
-                                      className="flex-1 rounded-xl text-xs h-9 bg-[#8B3A3A] hover:bg-[#7a3333] text-white"
-                                    >
-                                      {isGeneratingImage ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <ImageIcon className="w-3 h-3 mr-2" />}
-                                      Generate Image
-                                    </Button>
-                                    <Button
-                                      variant="outline"
-                                      className="flex-1 rounded-xl text-xs h-9 border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A]"
-                                      onClick={() => document.getElementById('card-image-upload')?.click()}
-                                    >
-                                      <Upload className="w-3 h-3 mr-2" />
-                                      Upload Image
-                                    </Button>
-                                    <input
-                                      type="file"
-                                      id="card-image-upload"
-                                      className="hidden"
-                                      accept="image/*"
-                                      onChange={handleForgeImageUpload}
-                                    />
-                                  </div>
-                                  <div className="grid grid-cols-3 gap-2 mt-2">
-                                    <div className="space-y-1">
-                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Aspect Ratio</Label>
-                                      <select
-                                        value={imageAspectRatio}
-                                        onChange={(e) => setImageAspectRatio(e.target.value)}
-                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
-                                      >
-                                        <option value="1:1">1:1</option>
-                                        <option value="3:4">3:4</option>
-                                        <option value="4:3">4:3</option>
-                                        <option value="9:16">9:16</option>
-                                        <option value="16:9">16:9</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Size</Label>
-                                      <select
-                                        value={imageSize}
-                                        onChange={(e) => setImageSize(e.target.value)}
-                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
-                                      >
-                                        <option value="512px">512px</option>
-                                        <option value="1K">1K</option>
-                                        <option value="2K">2K</option>
-                                        <option value="4K">4K</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Style</Label>
-                                      <select
-                                        value={imageStyle}
-                                        onChange={(e) => setImageStyle(e.target.value)}
-                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
-                                      >
-                                        <option value="None">None</option>
-                                        <option value="Photorealistic">Photoreal</option>
-                                        <option value="Anime / Manga">Anime</option>
-                                        <option value="Digital Art">Digital</option>
-                                        <option value="Oil Painting">Oil</option>
-                                        <option value="Dark Fantasy">Fantasy</option>
-                                        <option value="Cyberpunk">Cyberpunk</option>
-                                        <option value="Watercolor">Watercolor</option>
-                                        <option value="Comic Book">Comic</option>
-                                      </select>
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                <div className="w-full md:w-40 shrink-0 flex flex-col items-center justify-center">
-                                  <div className="w-32 h-40 md:w-full md:h-48 bg-white border border-slate-200 rounded-xl overflow-hidden flex items-center justify-center relative shadow-sm group">
-                                    {isGeneratingImage ? (
-                                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm z-10">
-                                        <Loader2 className="w-6 h-6 text-[#8B3A3A] animate-spin mb-2" />
-                                        <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Generating</span>
-                                      </div>
-                                    ) : characterImage ? (
-                                      <>
-                                        <img src={characterImage} alt="Character Portrait" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                          <Button
-                                            onClick={() => {
-                                              const a = document.createElement("a");
-                                              a.href = characterImage;
-                                              a.download = `portrait_${forgedCard.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || Date.now()}.png`;
-                                              document.body.appendChild(a);
-                                              a.click();
-                                              document.body.removeChild(a);
-                                            }}
-                                            variant="secondary"
-                                            size="sm"
-                                            className="rounded-full text-xs"
-                                          >
-                                            <Download className="w-3 h-3 mr-1" />
-                                            Download
-                                          </Button>
-                                        </div>
-                                      </>
-                                    ) : (
-                                      <ImageIcon className="w-8 h-8 text-slate-300" />
-                                    )}
                                   </div>
                                 </div>
                               </div>
                             </div>
-
+                            
                             {/* Theme Song Section */}
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
