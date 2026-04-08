@@ -286,6 +286,18 @@ Analyze the provided character data deeply. Look for recurring patterns in:
 
 Output ONLY the Markdown document. Make it look professional and attractive.`;
 
+async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit, retries = 2): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fetch(input, init);
+    } catch (e) {
+      if (attempt === retries || !(e instanceof TypeError)) throw e;
+      await new Promise(r => setTimeout(r, 1000 * (attempt + 1)));
+    }
+  }
+  throw new Error("fetchWithRetry: unreachable");
+}
+
 async function callAIProvider(
   provider: AIProvider,
   keys: ApiKeys,
@@ -323,7 +335,7 @@ async function callAIProvider(
         return response.text || "";
       }
       case "anthropic": {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
+        const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -367,7 +379,7 @@ async function callAIProvider(
         };
 
         const sendOpenAIRequest = async (useMaxCompletionTokens: boolean) => {
-          const res = await fetch("https://api.openai.com/v1/chat/completions", {
+          const res = await fetchWithRetry("https://api.openai.com/v1/chat/completions", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -416,7 +428,7 @@ async function callAIProvider(
 
         // OpenRouter models vary in JSON mode support, rely on prompt + regex parsing
         const sendOpenRouterRequest = async (useMaxCompletionTokens: boolean) => {
-          const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          const res = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -470,7 +482,7 @@ async function callAIProvider(
         };
 
         const sendRequest = async (includeMaxCompletionTokens: boolean) => {
-          const res = await fetch(keys.customEndpoint, {
+          const res = await fetchWithRetry(keys.customEndpoint, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",

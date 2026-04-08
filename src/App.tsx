@@ -45,6 +45,17 @@ interface SavedCard {
   date: string;
 }
 
+interface SavedDraft {
+  id: string;
+  name: string;
+  concept: string;
+  slots: { name: string; description: string; value: string }[];
+  selectedGuide?: string;
+  selectedTemplate?: string;
+  firstMessageIdea?: string;
+  date: string;
+}
+
 function InfoTooltip({ text }: { text: string }) {
   return (
     <div className="group relative inline-flex items-center ml-1.5 align-middle">
@@ -202,6 +213,7 @@ export default function App() {
   const setForgedCard = setForgedCardState;
   const [forgeBaseCard, setForgeBaseCard] = useState<CharacterCard | null>(null);
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
+  const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>([]);
   const [hasHydratedAutosave, setHasHydratedAutosave] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -299,6 +311,10 @@ export default function App() {
           } catch (e) {}
         }
       }
+    });
+
+    localforage.getItem("st_saved_drafts").then((savedDraftsData: any) => {
+      if (savedDraftsData) setSavedDrafts(savedDraftsData);
     });
 
     localforage.getItem(APP_AUTOSAVE_KEY).then((savedAppState: any) => {
@@ -972,6 +988,10 @@ export default function App() {
     localforage.setItem("st_saved_cards", savedCards).catch(e => console.error(e));
   }, [savedCards]);
 
+  useEffect(() => {
+    localforage.setItem("st_saved_drafts", savedDrafts).catch(e => console.error(e));
+  }, [savedDrafts]);
+
   const lastExtractedRef = useRef<{ guide: string, template: string }>({ guide: "", template: "" });
 
   useEffect(() => {
@@ -1533,11 +1553,17 @@ export default function App() {
   const handleSaveDraft = async (section: string) => {
     try {
       if (section === 'forge') {
-        await localforage.setItem("st_forge_draft", {
-          name: forgeName,
+        const newDraft: SavedDraft = {
+          id: Date.now().toString(),
+          name: forgeName || "Untitled Draft",
           concept: forgeConcept,
-          slots: forgeSlots
-        });
+          slots: forgeSlots,
+          selectedGuide: forgeSelectedGuide,
+          selectedTemplate: forgeSelectedTemplate,
+          firstMessageIdea: forgeFirstMessageIdea,
+          date: new Date().toISOString(),
+        };
+        setSavedDrafts(prev => [...prev, newDraft]);
       } else if (section === 'template') {
         await localforage.setItem("st_template_draft", {
           name: editingTemplateName,
@@ -2058,14 +2084,60 @@ export default function App() {
 
                   {showSavedCards ? (
                     <div className="space-y-6">
-                      {savedCards.length === 0 ? (
+                      {savedDrafts.length > 0 && (
+                        <>
+                          <h3 className="text-lg font-serif text-slate-700">Drafts</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {savedDrafts.map(draft => (
+                              <div key={draft.id} className="bg-amber-50/50 border border-amber-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group cursor-pointer" onClick={() => {
+                                    setForgeName(draft.name);
+                                    setForgeConcept(draft.concept);
+                                    setForgeSlots(draft.slots);
+                                    if (draft.selectedGuide) setForgeSelectedGuide(draft.selectedGuide);
+                                    if (draft.selectedTemplate) setForgeSelectedTemplate(draft.selectedTemplate);
+                                    if (draft.firstMessageIdea) setForgeFirstMessageIdea(draft.firstMessageIdea);
+                                    setForgedCard(null);
+                                    setShowSavedCards(false);
+                                  }}>
+                                <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm("Delete this draft?")) {
+                                        setSavedDrafts(prev => prev.filter(d => d.id !== draft.id));
+                                      }
+                                    }}
+                                    className="h-8 w-8 rounded-full border-amber-200 hover:bg-red-50 hover:text-red-600 text-slate-700"
+                                    title="Delete Draft"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h3 className="font-serif text-xl font-medium text-slate-900">{draft.name}</h3>
+                                  <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">Draft</span>
+                                </div>
+                                <p className="text-sm text-slate-500 mb-4">{draft.concept || "No concept yet"}</p>
+                                <div className="text-xs text-slate-400">
+                                  Saved on {new Date(draft.date).toLocaleDateString()}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      {savedCards.length === 0 && savedDrafts.length === 0 ? (
                         <div className="text-center py-16 bg-white rounded-3xl border border-[#e5e4e2] shadow-sm">
                           <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                           <h3 className="text-xl font-serif text-slate-900 mb-2">No Saved Cards</h3>
                           <p className="text-slate-500">Cards you forge and save will appear here.</p>
                         </div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      ) : savedCards.length > 0 ? (
+                        <>
+                          {savedDrafts.length > 0 && <h3 className="text-lg font-serif text-slate-700">Forged Cards</h3>}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           {savedCards.map(saved => (
                             <div key={saved.id} className="bg-white border border-[#e5e4e2] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group cursor-pointer" onClick={() => {
                                     setForgeName(saved.name);
@@ -2121,7 +2193,8 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-                      )}
+                        </>
+                      ) : null}
                     </div>
                   ) : (
                     <Tabs value={forgeActiveTab} onValueChange={setForgeActiveTab} className="w-full">
