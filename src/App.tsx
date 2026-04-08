@@ -1169,9 +1169,9 @@ export default function App() {
         templateExample
       );
       setForgedCard(result);
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to forge card. Check console for details.");
+      alert(`Failed to forge card: ${err.message || err}`);
     } finally {
       setIsForging(false);
     }

@@ -300,9 +300,7 @@ async function callAIProvider(
             { role: "user", content: prompt }
           ],
         };
-        if (jsonMode) {
-          body.response_format = { type: "json_object" };
-        }
+        // OpenRouter models vary in JSON mode support, rely on prompt + regex parsing
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -342,9 +340,7 @@ async function callAIProvider(
           } else {
             body.max_tokens = maxTokens;
           }
-          if (jsonMode) {
-            body.response_format = { type: "json_object" };
-          }
+          // Custom endpoints vary in JSON mode support, rely on prompt + regex parsing
           return body;
         };
 
