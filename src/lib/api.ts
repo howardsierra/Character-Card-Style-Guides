@@ -1273,6 +1273,49 @@ ${JSON.stringify(card, null, 2)}`;
   }
 }
 
+export async function generateAlternateGreeting(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: CharacterCard,
+  existingGreetings: string[],
+  model?: string,
+  onChunk?: (partialText: string) => void
+): Promise<string> {
+  const existingList = [card.first_mes, ...existingGreetings]
+    .map((g, i) => `--- Greeting ${i + 1} ---\n${g}`)
+    .join("\n\n");
+
+  const prompt = `You are an expert character roleplay writer. Generate a NEW alternate first message / greeting for the following character.
+
+CHARACTER:
+Name: ${card.name}
+Description: ${card.description}
+Personality: ${card.personality}
+Scenario: ${card.scenario}
+
+EXISTING GREETINGS (do NOT repeat these — create something fresh with a different scenario, mood, or setting):
+${existingList}
+
+Write a single new greeting that:
+- Matches the character's voice, tone, and personality exactly
+- Presents a different situation, scenario, or mood from the existing greetings
+- Is roughly the same length and detail level as the existing greetings
+- Uses the same formatting conventions (asterisks for actions, quotes for dialogue, etc.)
+
+Output ONLY the greeting text. No labels, no JSON, no explanations.`;
+
+  return callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character roleplay writer. Output only the greeting text.",
+    false,
+    8192,
+    model,
+    onChunk
+  );
+}
+
 export async function generateCharacterImage(
   keys: ApiKeys,
   prompt: string,
