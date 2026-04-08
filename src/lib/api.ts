@@ -135,13 +135,21 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
       }
       case "custom": {
         if (!keys.customEndpoint || !keys.customKey) return [];
-        const baseUrl = keys.customEndpoint.replace(/\/chat\/completions\/?$/, "");
-        const res = await fetch(`${baseUrl}/models`, {
-          headers: { "Authorization": `Bearer ${keys.customKey}` }
-        });
-        if (!res.ok) throw new Error("Failed to fetch Custom models");
-        const data = await res.json();
-        return data.data.map((m: any) => ({ id: m.id, name: m.id }));
+        try {
+          const baseUrl = keys.customEndpoint.replace(/\/chat\/completions\/?$/, "");
+          const res = await fetch(`${baseUrl}/models`, {
+            headers: { "Authorization": `Bearer ${keys.customKey}` }
+          });
+          if (!res.ok) throw new Error("Failed to fetch Custom models");
+          const data = await res.json();
+          if (data && data.data && Array.isArray(data.data)) {
+            return data.data.map((m: any) => ({ id: m.id, name: m.id }));
+          }
+          throw new Error("Invalid format");
+        } catch (e) {
+          console.warn("Could not fetch custom models, using default", e);
+          return [{ id: "default", name: "Default Custom Model" }];
+        }
       }
       default:
         return [];
@@ -873,78 +881,16 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
   };
 
   try {
-    if (provider === "gemini") {
-      const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY || "dummy" });
-      const response = await ai.models.generateContent({
-        model: model || "gemini-3.1-flash-preview",
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
-      });
-      return parseResponse(response.text || "");
-    } else if (provider === "anthropic") {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": keys.anthropic,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: model || "claude-3-5-sonnet-20240620",
-          max_tokens: 4000,
-          messages: [{ role: "user", content: prompt }]
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.content[0].text);
-    } else if (provider === "openai") {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${keys.openai}`
-        },
-        body: JSON.stringify({
-          model: model || "gpt-4o",
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" }
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.choices[0].message.content);
-    } else if (provider === "openrouter") {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${keys.openrouter}`
-        },
-        body: JSON.stringify({
-          model: model || "anthropic/claude-3.5-sonnet",
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" }
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.choices[0].message.content);
-    } else if (provider === "custom") {
-      const response = await fetch(keys.customEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${keys.customKey}`
-        },
-        body: JSON.stringify({
-          model: model || "",
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" }
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.choices[0].message.content);
-    }
-    return { nodes: [], links: [] };
+    const responseText = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert relationship map generator. Output only valid JSON.",
+      true,
+      4000,
+      model
+    );
+    return parseResponse(responseText);
   } catch (error) {
     console.error("Error extracting universe:", error);
     return { nodes: [], links: [] };

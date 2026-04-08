@@ -1299,7 +1299,7 @@ export default function App() {
     setIsGeneratingStudioPrompt(true);
     try {
       const { generateImagePrompt } = await import("./lib/api");
-      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const { currentProvider, currentModel } = getProviderAndModel("studio_prompt");
       const details = JSON.stringify(card.card, null, 2);
       const prompt = await generateImagePrompt(currentProvider, apiKeys, details, currentModel);
       setStudioImagePrompt(prompt);
@@ -1585,6 +1585,39 @@ export default function App() {
     alert("Card saved to library!");
   };
 
+  const handleSaveDraft = async (section: string) => {
+    try {
+      if (section === 'forge') {
+        await localforage.setItem("st_forge_draft", {
+          name: forgeName,
+          concept: forgeConcept,
+          slots: forgeSlots
+        });
+      } else if (section === 'template') {
+        await localforage.setItem("st_template_draft", {
+          name: editingTemplateName,
+          content: editingTemplateContent,
+          example: editingTemplateExample
+        });
+      } else if (section === 'app') {
+        const existingState: any = await localforage.getItem("st_app_autosave_v1") || {};
+        await localforage.setItem("st_app_autosave_v1", {
+          ...existingState,
+          view,
+          currentGuide,
+          scriptPrompt,
+          studioImagePrompt,
+          imageAspectRatio,
+          imageStyle,
+        });
+      }
+      alert("Draft saved successfully!");
+    } catch (e) {
+      console.error("Failed to save draft", e);
+      alert("Failed to save draft.");
+    }
+  };
+
   const handleAddUniverseLink = (sourceId: string, targetId: string, type: "relationship" | "pipeline", label: string) => {
     if (!universeData) return;
     setUniverseData({
@@ -1836,6 +1869,10 @@ export default function App() {
                         )
                       ) : (
                         <>
+                          <Button variant="outline" onClick={() => handleSaveDraft('app')} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                            <Save className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+                            Save Draft
+                          </Button>
                           <Button variant="outline" onClick={saveCurrentGuide} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
                             <Check className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             Save to Library
@@ -2052,14 +2089,26 @@ export default function App() {
                         Generate a new character card using a saved style guide.
                       </p>
                     </div>
-                    <Button 
-                      onClick={() => setShowSavedCards(!showSavedCards)}
-                      variant="outline"
-                      className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
-                    >
-                      <BookOpen className="w-4 h-4 mr-2" />
-                      {showSavedCards ? "Back to Forge" : "Saved Cards"}
-                    </Button>
+                    <div className="flex gap-2">
+                      {!showSavedCards && (
+                        <Button 
+                          onClick={() => handleSaveDraft('forge')}
+                          variant="outline"
+                          className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          Save Draft
+                        </Button>
+                      )}
+                      <Button 
+                        onClick={() => setShowSavedCards(!showSavedCards)}
+                        variant="outline"
+                        className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                      >
+                        <BookOpen className="w-4 h-4 mr-2" />
+                        {showSavedCards ? "Back to Forge" : "Saved Cards"}
+                      </Button>
+                    </div>
                   </div>
 
                   {showSavedCards ? (
@@ -2075,6 +2124,15 @@ export default function App() {
                           {savedCards.map(saved => (
                             <div key={saved.id} className="bg-white border border-[#e5e4e2] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group">
                               <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={() => exportCardJson(saved.card)}
+                                  className="h-8 w-8 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700"
+                                  title="Download Card"
+                                >
+                                  <Download className="w-4 h-4" />
+                                </Button>
                                 <Button
                                   variant="outline"
                                   size="icon"
@@ -2939,17 +2997,27 @@ export default function App() {
                         Generate images for your characters using AI.
                       </p>
                     </div>
-                    <ModelSelector
-                      sectionId="forge_image"
-                      globalProvider={provider}
-                      globalModels={apiModels}
-                      sectionConfigs={sectionConfigs}
-                      setSectionConfigs={setSectionConfigs}
-                      availableModels={availableModels}
-                      isFetchingModels={isFetchingModels}
-                      allowedProviders={["gemini"]}
-                      filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
-                    />
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+                      <Button 
+                        onClick={() => handleSaveDraft('app')}
+                        variant="outline"
+                        className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Draft
+                      </Button>
+                      <ModelSelector
+                        sectionId="forge_image"
+                        globalProvider={provider}
+                        globalModels={apiModels}
+                        sectionConfigs={sectionConfigs}
+                        setSectionConfigs={setSectionConfigs}
+                        availableModels={availableModels}
+                        isFetchingModels={isFetchingModels}
+                        allowedProviders={["gemini"]}
+                        filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
+                      />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8 h-full">
@@ -2985,22 +3053,33 @@ export default function App() {
                         </div>
 
                         <div className="space-y-3">
-                          <div className="flex items-center justify-between">
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                             <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
                               <FileText className="w-4 h-4 mr-2 text-[#8B3A3A]" />
                               Image Prompt
                             </Label>
                             {studioSelectedCard && (
-                              <Button 
-                                onClick={handleGenerateStudioImagePrompt} 
-                                disabled={isGeneratingStudioPrompt}
-                                variant="outline"
-                                size="sm"
-                                className="h-8 text-xs border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A]"
-                              >
-                                {isGeneratingStudioPrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
-                                Auto-Generate Prompt
-                              </Button>
+                              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
+                                <ModelSelector
+                                  sectionId="studio_prompt"
+                                  globalProvider={provider}
+                                  globalModels={apiModels}
+                                  sectionConfigs={sectionConfigs}
+                                  setSectionConfigs={setSectionConfigs}
+                                  availableModels={availableModels}
+                                  isFetchingModels={isFetchingModels}
+                                />
+                                <Button 
+                                  onClick={handleGenerateStudioImagePrompt} 
+                                  disabled={isGeneratingStudioPrompt}
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-8 text-xs border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] w-full sm:w-auto"
+                                >
+                                  {isGeneratingStudioPrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
+                                  Auto-Generate Prompt
+                                </Button>
+                              </div>
                             )}
                           </div>
                           <Textarea 
@@ -3201,15 +3280,25 @@ export default function App() {
                         Visualize character relationships and extract shared universes.
                       </p>
                     </div>
-                    <ModelSelector
-                      sectionId="universe"
-                      globalProvider={provider}
-                      globalModels={apiModels}
-                      sectionConfigs={sectionConfigs}
-                      setSectionConfigs={setSectionConfigs}
-                      availableModels={availableModels}
-                      isFetchingModels={isFetchingModels}
-                    />
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+                      <Button 
+                        onClick={() => handleSaveDraft('app')}
+                        variant="outline"
+                        className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Draft
+                      </Button>
+                      <ModelSelector
+                        sectionId="universe"
+                        globalProvider={provider}
+                        globalModels={apiModels}
+                        sectionConfigs={sectionConfigs}
+                        setSectionConfigs={setSectionConfigs}
+                        availableModels={availableModels}
+                        isFetchingModels={isFetchingModels}
+                      />
+                    </div>
                   </div>
 
                   <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
@@ -3318,15 +3407,25 @@ export default function App() {
                         Build JanitorAI scripts and lorebooks.
                       </p>
                     </div>
-                    <ModelSelector
-                      sectionId="script"
-                      globalProvider={provider}
-                      globalModels={apiModels}
-                      sectionConfigs={sectionConfigs}
-                      setSectionConfigs={setSectionConfigs}
-                      availableModels={availableModels}
-                      isFetchingModels={isFetchingModels}
-                    />
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+                      <Button 
+                        onClick={() => handleSaveDraft('app')}
+                        variant="outline"
+                        className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Draft
+                      </Button>
+                      <ModelSelector
+                        sectionId="script"
+                        globalProvider={provider}
+                        globalModels={apiModels}
+                        sectionConfigs={sectionConfigs}
+                        setSectionConfigs={setSectionConfigs}
+                        availableModels={availableModels}
+                        isFetchingModels={isFetchingModels}
+                      />
+                    </div>
                   </div>
 
                   <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
@@ -3650,21 +3749,31 @@ export default function App() {
                         />
                       </div>
                     </div>
-                    <div className="p-6 border-t border-[#e5e4e2] bg-[#f9f8f6] flex justify-end gap-3">
+                    <div className="p-6 border-t border-[#e5e4e2] bg-[#f9f8f6] flex justify-between items-center">
                       <Button
                         variant="outline"
-                        onClick={() => setIsTemplateEditorOpen(false)}
-                        className="rounded-xl border-[#e5e4e2] hover:bg-white text-slate-700"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={saveTemplate}
-                        className="rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20"
+                        onClick={() => handleSaveDraft('template')}
+                        className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 text-slate-700"
                       >
                         <Save className="w-4 h-4 mr-2" />
-                        Save Template
+                        Save Draft
                       </Button>
+                      <div className="flex gap-3">
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsTemplateEditorOpen(false)}
+                          className="rounded-xl border-[#e5e4e2] hover:bg-white text-slate-700"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={saveTemplate}
+                          className="rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          Save Template
+                        </Button>
+                      </div>
                     </div>
                   </motion.div>
                 </div>
