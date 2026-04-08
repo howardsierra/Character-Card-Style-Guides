@@ -195,6 +195,7 @@ export default function App() {
   
   const [imagePrompt, setImagePrompt] = useState("");
   const [isGeneratingImagePrompt, setIsGeneratingImagePrompt] = useState(false);
+  const [isGeneratingGreeting, setIsGeneratingGreeting] = useState(false);
   
   const [suggestedSong, setSuggestedSong] = useState<{title: string, artist: string, reason: string} | null>(null);
   const [isSuggestingSong, setIsSuggestingSong] = useState(false);
@@ -1234,6 +1235,35 @@ export default function App() {
       alert("Failed to suggest theme song.");
     } finally {
       setIsSuggestingSong(false);
+    }
+  };
+
+  const handleGenerateGreeting = async () => {
+    if (!forgedCard) return;
+    setIsGeneratingGreeting(true);
+    try {
+      const { generateAlternateGreeting } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const existingGreetings = forgedCard.alternate_greetings || [];
+      const greeting = await generateAlternateGreeting(
+        currentProvider,
+        apiKeys,
+        forgedCard,
+        existingGreetings,
+        currentModel,
+        (partial) => setForgeStreamText(partial)
+      );
+      setForgedCard({
+        ...forgedCard,
+        alternate_greetings: [...existingGreetings, greeting.trim()]
+      });
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate greeting: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsGeneratingGreeting(false);
     }
   };
 
@@ -2843,11 +2873,63 @@ export default function App() {
                                   </Button>
                                 </div>
                               </div>
-                              <Textarea 
+                              <Textarea
                                 value={forgedCard.first_mes}
                                 onChange={(e) => setForgedCard({ ...forgedCard, first_mes: e.target.value })}
                                 className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px] focus-visible:ring-[#8B3A3A]/50"
                               />
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Alternate Greetings</h4>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleGenerateGreeting}
+                                  disabled={isGeneratingGreeting}
+                                  className="h-7 text-xs rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A]"
+                                >
+                                  {isGeneratingGreeting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Plus className="w-3 h-3 mr-1" />}
+                                  {isGeneratingGreeting ? "Generating..." : "Generate Greeting"}
+                                </Button>
+                              </div>
+                              {isGeneratingGreeting && forgeStreamText && (
+                                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 font-mono max-h-24 overflow-y-auto mb-3">
+                                  Streaming... ({forgeStreamText.length} chars received)
+                                </div>
+                              )}
+                              {(forgedCard.alternate_greetings?.length ?? 0) === 0 && !isGeneratingGreeting && (
+                                <p className="text-sm text-slate-400 italic">No alternate greetings yet. Click "Generate Greeting" to add one.</p>
+                              )}
+                              {forgedCard.alternate_greetings?.map((greeting, idx) => (
+                                <div key={idx} className="mb-3">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs text-slate-400 font-mono">Greeting {idx + 2} &middot; ~{estimateTokens(greeting)} tokens</span>
+                                    <div className="flex items-center gap-1">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(greeting)}>
+                                        <Copy className="w-3 h-3" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-red-500" onClick={() => {
+                                        const updated = [...(forgedCard.alternate_greetings || [])];
+                                        updated.splice(idx, 1);
+                                        setForgedCard({ ...forgedCard, alternate_greetings: updated });
+                                      }}>
+                                        <Trash2 className="w-3 h-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <Textarea
+                                    value={greeting}
+                                    onChange={(e) => {
+                                      const updated = [...(forgedCard.alternate_greetings || [])];
+                                      updated[idx] = e.target.value;
+                                      setForgedCard({ ...forgedCard, alternate_greetings: updated });
+                                    }}
+                                    className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[120px] focus-visible:ring-[#8B3A3A]/50"
+                                  />
+                                </div>
+                              ))}
                             </div>
 
                             <div>
