@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -185,6 +185,8 @@ export default function App() {
   const [editingTemplateExample, setEditingTemplateExample] = useState("");
   const [isForging, setIsForging] = useState(false);
   const [forgeError, setForgeError] = useState<string | null>(null);
+  const [forgeStreamText, setForgeStreamText] = useState<string>("");
+  const [lastForgeAction, setLastForgeAction] = useState<"forge" | "vibe" | null>(null);
   const [isExtractingSlots, setIsExtractingSlots] = useState(false);
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
   const [generatingSlotIndex, setGeneratingSlotIndex] = useState<number | null>(null);
@@ -1148,6 +1150,7 @@ export default function App() {
 
   const handleForgeCard = async () => {
     setForgeError(null);
+    setForgeStreamText("");
     const missingFields = [];
     if (!forgeName.trim()) missingFields.push("Character Name");
     if (!forgeConcept.trim()) missingFields.push("Core Concept / Archetype");
@@ -1157,7 +1160,7 @@ export default function App() {
       setForgeError(`Please fill in the following required fields: ${missingFields.join(", ")}`);
       return;
     }
-    
+
     const guide = guides.find(g => g.id === forgeSelectedGuide);
     if (!guide) {
       setForgeError("Selected Style Guide not found.");
@@ -1165,6 +1168,7 @@ export default function App() {
     }
 
     setIsForging(true);
+    setLastForgeAction("forge");
     setSuggestedSong(null);
     try {
       const allSlots = [
@@ -1176,7 +1180,7 @@ export default function App() {
       const templateObj = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
       const template = templateObj?.content;
       const templateExample = templateObj?.example;
-      
+
       const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
       const result = await generateCharacterCard(
         currentProvider,
@@ -1186,12 +1190,15 @@ export default function App() {
         template,
         currentModel,
         forgeFirstMessageIdea,
-        templateExample
+        templateExample,
+        (partial) => setForgeStreamText(partial)
       );
       setForgedCard(result);
+      setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert(`Failed to forge card: ${err.message || err}`);
+      setForgeError(err.message || String(err));
+      setForgeStreamText("");
     } finally {
       setIsForging(false);
     }
@@ -1445,13 +1452,16 @@ export default function App() {
       return;
     }
     setIsVibeForging(true);
+    setLastForgeAction("vibe");
+    setForgeError(null);
+    setForgeStreamText("");
     try {
       const { vibeForgeCard } = await import("./lib/api");
       const { currentProvider, currentModel } = getProviderAndModel("forge_vibe");
       const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
       const templateExample = template?.example;
       const guide = guides.find(g => g.id === forgeSelectedGuide);
-      
+
       const result = await vibeForgeCard(
         currentProvider,
         apiKeys,
@@ -1459,7 +1469,8 @@ export default function App() {
         forgeSlots,
         currentModel,
         templateExample,
-        guide?.content
+        guide?.content,
+        (partial) => setForgeStreamText(partial)
       );
 
       setForgeName(result.name);
@@ -1467,17 +1478,18 @@ export default function App() {
       if (result.firstMessageIdea) {
         setForgeFirstMessageIdea(result.firstMessageIdea);
       }
-      
+
       setForgeSlots(prev => prev.map(slot => ({
         ...slot,
         value: result.slots[slot.name] || slot.value
       })));
-      
+
       setForgeActiveTab("details");
-      
+      setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to vibe forge: " + err.message);
+      setForgeError(err.message || String(err));
+      setForgeStreamText("");
     } finally {
       setIsVibeForging(false);
     }
@@ -2243,13 +2255,18 @@ export default function App() {
                                 isFetchingModels={isFetchingModels}
                               />
                             </div>
-                            <Button 
+                            {isVibeForging && forgeStreamText && (
+                              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-500 font-mono max-h-24 overflow-y-auto">
+                                Streaming... ({forgeStreamText.length} chars received)
+                              </div>
+                            )}
+                            <Button
                               onClick={handleVibeForge}
                               disabled={isVibeForging || !vibePrompt.trim() || !forgeSelectedGuide}
                               className="w-full sm:w-auto h-12 px-8 rounded-xl bg-purple-600 hover:bg-purple-700 text-white shadow-md shadow-purple-600/20 transition-all text-base font-medium"
                             >
                               {isVibeForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
-                              Forge from Vibe
+                              {isVibeForging ? "Forging..." : "Forge from Vibe"}
                             </Button>
                           </div>
                         </div>
@@ -2593,17 +2610,33 @@ export default function App() {
                           />
                         </div>
                         {forgeError && (
-                          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm">
-                            {forgeError}
+                          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm flex items-center justify-between gap-3">
+                            <span>{forgeError}</span>
+                            {lastForgeAction && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => lastForgeAction === "forge" ? handleForgeCard() : handleVibeForge()}
+                                className="shrink-0 border-red-300 hover:bg-red-100 text-red-700"
+                              >
+                                <RefreshCw className="w-4 h-4 mr-1" />
+                                Retry
+                              </Button>
+                            )}
                           </div>
                         )}
-                        <Button 
-                          onClick={handleForgeCard} 
-                          disabled={isForging} 
+                        {isForging && forgeStreamText && (
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 font-mono max-h-24 overflow-y-auto">
+                            Streaming... ({forgeStreamText.length} chars received)
+                          </div>
+                        )}
+                        <Button
+                          onClick={handleForgeCard}
+                          disabled={isForging}
                           className="w-full rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white py-6 text-lg shadow-md shadow-[#8B3A3A]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                         >
                           {isForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
-                          Forge Character
+                          {isForging ? "Forging..." : "Forge Character"}
                         </Button>
                       </div>
                     </div>
