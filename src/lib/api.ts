@@ -1279,13 +1279,15 @@ export async function generateAlternateGreeting(
   card: CharacterCard,
   existingGreetings: string[],
   model?: string,
-  onChunk?: (partialText: string) => void
+  onChunk?: (partialText: string) => void,
+  vibePrompt?: string,
+  styleGuide?: string
 ): Promise<string> {
   const existingList = [card.first_mes, ...existingGreetings]
     .map((g, i) => `--- Greeting ${i + 1} ---\n${g}`)
     .join("\n\n");
 
-  const prompt = `You are an expert character roleplay writer. Generate a NEW alternate first message / greeting for the following character.
+  let prompt = `You are an expert character roleplay writer. Generate a NEW alternate first message / greeting for the following character.
 
 CHARACTER:
 Name: ${card.name}
@@ -1295,12 +1297,28 @@ Scenario: ${card.scenario}
 
 EXISTING GREETINGS (do NOT repeat these — create something fresh with a different scenario, mood, or setting):
 ${existingList}
+`;
 
+  if (vibePrompt && vibePrompt.trim()) {
+    prompt += `
+USER DIRECTION FOR THE NEW GREETING (follow this closely — this describes the scenario, mood, or situation the user wants):
+"${vibePrompt}"
+`;
+  }
+
+  if (styleGuide && styleGuide.trim()) {
+    prompt += `
+STYLE GUIDE (dictates writing voice, prose style, tone, formatting conventions, and stylistic techniques — follow this strictly):
+${styleGuide}
+`;
+  }
+
+  prompt += `
 Write a single new greeting that:
 - Matches the character's voice, tone, and personality exactly
 - Presents a different situation, scenario, or mood from the existing greetings
-- Is roughly the same length and detail level as the existing greetings
-- Uses the same formatting conventions (asterisks for actions, quotes for dialogue, etc.)
+- ${vibePrompt ? "Strictly follows the user direction above" : "Is roughly the same length and detail level as the existing greetings"}
+- ${styleGuide ? "Strictly follows the prose conventions of the Style Guide" : "Uses the same formatting conventions (asterisks for actions, quotes for dialogue, etc.)"}
 
 Output ONLY the greeting text. No labels, no JSON, no explanations.`;
 
@@ -1314,6 +1332,61 @@ Output ONLY the greeting text. No labels, no JSON, no explanations.`;
     model,
     onChunk
   );
+}
+
+export async function adaptCardToStyleGuide(
+  provider: AIProvider,
+  keys: ApiKeys,
+  rawText: string,
+  styleGuide: string,
+  model?: string,
+  onChunk?: (partialText: string) => void
+): Promise<CharacterCard> {
+  const prompt = `You are an expert character card editor. A user has pasted raw character card text (could be JSON, bracketed format, W++, Ali:Chat, plain text, or any other format). Your job is to EXTRACT the character and REWRITE all prose fields to match the provided Style Guide.
+
+RAW INPUT (this may be messy, partial, or in any format — parse it intelligently):
+"""
+${rawText}
+"""
+
+STYLE GUIDE (dictates writing voice, prose style, tone, formatting conventions, and stylistic techniques — follow this strictly for every prose field):
+${styleGuide}
+
+YOUR TASK:
+1. Extract the character's identity (name, core traits, scenario, first message) from the raw input.
+2. REWRITE each prose field (description, personality, scenario, first_mes, mes_example) to STRICTLY follow the Style Guide's voice, prose style, formatting, and conventions.
+3. Preserve the character's core identity, relationships, and scenario — only change the WRITING STYLE.
+4. If any field is missing from the input, invent a stylistically-consistent value that fits the character.
+
+OUTPUT FORMAT:
+You MUST output ONLY valid JSON matching this structure. Do not include any other text, explanations, or markdown formatting outside the JSON object.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
+{
+  "name": "string",
+  "description": "string",
+  "personality": "string",
+  "scenario": "string",
+  "first_mes": "string",
+  "mes_example": "string"
+}`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character card editor. Output only valid JSON.",
+    true,
+    16384,
+    model,
+    onChunk
+  );
+
+  try {
+    return extractJSON(responseText) as CharacterCard;
+  } catch (e: any) {
+    console.error("Failed to parse adapted card JSON:", responseText);
+    throw new Error(`AI did not return valid JSON: ${e.message}`);
+  }
 }
 
 export async function generateCharacterImage(
