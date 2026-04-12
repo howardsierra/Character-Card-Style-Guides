@@ -196,6 +196,21 @@ export default function App() {
   const [imagePrompt, setImagePrompt] = useState("");
   const [isGeneratingImagePrompt, setIsGeneratingImagePrompt] = useState(false);
   const [isGeneratingGreeting, setIsGeneratingGreeting] = useState(false);
+
+  // Greeting Studio — vibe-style greeting generation for saved or uploaded cards
+  const [studioCardSource, setStudioCardSource] = useState<"saved" | "upload">("saved");
+  const [studioSelectedCardId, setStudioSelectedCardId] = useState<string>("");
+  const [studioUploadedCard, setStudioUploadedCard] = useState<CharacterCard | null>(null);
+  const [studioSelectedGuide, setStudioSelectedGuide] = useState<string>("");
+  const [studioVibePrompt, setStudioVibePrompt] = useState("");
+  const [studioGeneratedGreeting, setStudioGeneratedGreeting] = useState<string>("");
+  const [isStudioGenerating, setIsStudioGenerating] = useState(false);
+
+  // Adapt Card — paste off-platform card text and rewrite to style guide
+  const [adaptRawText, setAdaptRawText] = useState("");
+  const [adaptSelectedGuide, setAdaptSelectedGuide] = useState<string>("");
+  const [adaptedCard, setAdaptedCard] = useState<CharacterCard | null>(null);
+  const [isAdapting, setIsAdapting] = useState(false);
   
   const [suggestedSong, setSuggestedSong] = useState<{title: string, artist: string, reason: string} | null>(null);
   const [isSuggestingSong, setIsSuggestingSong] = useState(false);
@@ -1267,6 +1282,159 @@ export default function App() {
     }
   };
 
+  const handleStudioCardUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const card = await parseFile(file);
+      setStudioUploadedCard(card);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
+    }
+    e.target.value = "";
+  };
+
+  const handleStudioGenerate = async () => {
+    const card = studioCardSource === "saved"
+      ? savedCards.find(c => c.id === studioSelectedCardId)?.card
+      : studioUploadedCard;
+    if (!card) {
+      alert(studioCardSource === "saved" ? "Please select a saved card first." : "Please upload a card first.");
+      return;
+    }
+    if (!studioVibePrompt.trim()) {
+      alert("Please describe what you want the new greeting to be about.");
+      return;
+    }
+    setIsStudioGenerating(true);
+    setStudioGeneratedGreeting("");
+    setForgeStreamText("");
+    try {
+      const { generateAlternateGreeting } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const guide = guides.find(g => g.id === studioSelectedGuide);
+      const greeting = await generateAlternateGreeting(
+        currentProvider,
+        apiKeys,
+        card,
+        card.alternate_greetings || [],
+        currentModel,
+        (partial) => { setForgeStreamText(partial); setStudioGeneratedGreeting(partial); },
+        studioVibePrompt,
+        guide?.content
+      );
+      setStudioGeneratedGreeting(greeting.trim());
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate greeting: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsStudioGenerating(false);
+    }
+  };
+
+  const handleStudioAppendToCard = () => {
+    if (!studioGeneratedGreeting.trim()) return;
+    const card = studioCardSource === "saved"
+      ? savedCards.find(c => c.id === studioSelectedCardId)?.card
+      : studioUploadedCard;
+    if (!card) return;
+    const updated: CharacterCard = {
+      ...card,
+      alternate_greetings: [...(card.alternate_greetings || []), studioGeneratedGreeting.trim()]
+    };
+    if (studioCardSource === "saved") {
+      setSavedCards(prev => prev.map(c => c.id === studioSelectedCardId ? { ...c, card: updated } : c));
+    } else {
+      setStudioUploadedCard(updated);
+    }
+    setStudioGeneratedGreeting("");
+    alert("Greeting added to card!");
+  };
+
+  const handleAdaptCard = async () => {
+    if (!adaptRawText.trim()) {
+      alert("Please paste your card text first.");
+      return;
+    }
+    if (!adaptSelectedGuide) {
+      alert("Please select a style guide to adapt the card to.");
+      return;
+    }
+    const guide = guides.find(g => g.id === adaptSelectedGuide);
+    if (!guide) {
+      alert("Selected style guide not found.");
+      return;
+    }
+    setIsAdapting(true);
+    setAdaptedCard(null);
+    setForgeStreamText("");
+    try {
+      const { adaptCardToStyleGuide } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const card = await adaptCardToStyleGuide(
+        currentProvider,
+        apiKeys,
+        adaptRawText,
+        guide.content,
+        currentModel,
+        (partial) => setForgeStreamText(partial)
+      );
+      setAdaptedCard(card);
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to adapt card: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsAdapting(false);
+    }
+  };
+
+  const handleLoadAdaptedCard = () => {
+    if (!adaptedCard) return;
+    setForgeName(adaptedCard.name || "");
+    setForgeConcept(adaptedCard.personality || "");
+    setForgeFirstMessageIdea(adaptedCard.first_mes || "");
+    setForgedCard(adaptedCard);
+    setForgeSelectedGuide(adaptSelectedGuide);
+    setForgeActiveTab("preview");
+  };
+
+  const handleAdaptGenerateGreeting = async () => {
+    if (!adaptedCard) return;
+    const guide = guides.find(g => g.id === adaptSelectedGuide);
+    setIsAdapting(true);
+    setForgeStreamText("");
+    try {
+      const { generateAlternateGreeting } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const greeting = await generateAlternateGreeting(
+        currentProvider,
+        apiKeys,
+        adaptedCard,
+        adaptedCard.alternate_greetings || [],
+        currentModel,
+        (partial) => setForgeStreamText(partial),
+        undefined,
+        guide?.content
+      );
+      setAdaptedCard({
+        ...adaptedCard,
+        alternate_greetings: [...(adaptedCard.alternate_greetings || []), greeting.trim()]
+      });
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate greeting: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsAdapting(false);
+    }
+  };
+
   const handleStudioReferenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -2240,9 +2408,11 @@ export default function App() {
                     </div>
                   ) : (
                     <Tabs value={forgeActiveTab} onValueChange={setForgeActiveTab} className="w-full">
-                      <TabsList className="flex flex-col sm:grid w-full sm:grid-cols-3 mb-6 h-auto sm:h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 gap-1 sm:gap-0">
+                      <TabsList className="flex flex-col sm:grid w-full sm:grid-cols-5 mb-6 h-auto sm:h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 gap-1 sm:gap-0">
                         <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Character Details</TabsTrigger>
                         <TabsTrigger value="vibe" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Vibe Forge</TabsTrigger>
+                        <TabsTrigger value="greeting-studio" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Greeting Studio</TabsTrigger>
+                        <TabsTrigger value="adapt" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Adapt Card</TabsTrigger>
                         <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Output Preview</TabsTrigger>
                       </TabsList>
 
@@ -2670,6 +2840,293 @@ export default function App() {
                         </Button>
                       </div>
                     </div>
+                      </TabsContent>
+
+                      {/* Greeting Studio — vibe-style greeting generation for saved or uploaded cards */}
+                      <TabsContent value="greeting-studio" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500/20 via-emerald-500 to-emerald-500/20"></div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Greeting Studio</h3>
+                          </div>
+
+                          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 mb-6">
+                            <h4 className="text-lg font-medium text-emerald-900 mb-2">Vibe-style Greeting Generation</h4>
+                            <p className="text-emerald-700 text-sm">
+                              Pick a saved card or upload one, describe the scenario/mood you want, and the AI will write a fresh greeting in the character's voice. Saved cards can use an associated style guide.
+                            </p>
+                          </div>
+
+                          <div className="flex gap-2">
+                            <Button
+                              variant={studioCardSource === "saved" ? "default" : "outline"}
+                              onClick={() => setStudioCardSource("saved")}
+                              className={studioCardSource === "saved" ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
+                            >
+                              <BookOpen className="w-4 h-4 mr-2" />
+                              Saved Card
+                            </Button>
+                            <Button
+                              variant={studioCardSource === "upload" ? "default" : "outline"}
+                              onClick={() => setStudioCardSource("upload")}
+                              className={studioCardSource === "upload" ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
+                            >
+                              <Upload className="w-4 h-4 mr-2" />
+                              Upload Card
+                            </Button>
+                          </div>
+
+                          {studioCardSource === "saved" ? (
+                            <div className="space-y-2">
+                              <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                                Select Saved Card <span className="text-red-500 ml-1">*</span>
+                              </Label>
+                              <select
+                                value={studioSelectedCardId}
+                                onChange={(e) => setStudioSelectedCardId(e.target.value)}
+                                className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
+                              >
+                                <option value="" disabled>Pick a saved card...</option>
+                                {savedCards.map((c) => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </select>
+                              {savedCards.length === 0 && (
+                                <p className="text-xs text-amber-600 mt-1">No saved cards yet. Forge and save a card first.</p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                                Upload Card File <span className="text-red-500 ml-1">*</span>
+                              </Label>
+                              <Input
+                                type="file"
+                                accept=".json,.png"
+                                onChange={handleStudioCardUpload}
+                                className="rounded-xl bg-[#f9f8f6] hover:bg-white border-[#e5e4e2]"
+                              />
+                              {studioUploadedCard && (
+                                <p className="text-xs text-slate-600 mt-1">Loaded: <span className="font-semibold">{studioUploadedCard.name || "Unnamed Card"}</span></p>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Style Guide <span className="text-slate-400 font-normal ml-2 text-xs normal-case tracking-normal">(Optional)</span>
+                            </Label>
+                            <select
+                              value={studioSelectedGuide}
+                              onChange={(e) => setStudioSelectedGuide(e.target.value)}
+                              className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
+                            >
+                              <option value="">No style guide (use card's natural voice)</option>
+                              {guides.map((g) => (
+                                <option key={g.id} value={g.id}>{g.title}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="studioVibe" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Describe the Greeting You Want <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <Textarea
+                              id="studioVibe"
+                              placeholder="e.g., The character returns home after a long journey and finds the user waiting in the kitchen, making tea. They're emotional but trying to hide it..."
+                              value={studioVibePrompt}
+                              onChange={(e) => setStudioVibePrompt(e.target.value)}
+                              className="bg-[#f9f8f6] hover:bg-white focus:bg-white border-[#e5e4e2] rounded-xl min-h-[100px]"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <ModelSelector
+                              sectionId="forge_generate"
+                              globalProvider={provider}
+                              globalModels={apiModels}
+                              sectionConfigs={sectionConfigs}
+                              setSectionConfigs={setSectionConfigs}
+                              availableModels={availableModels}
+                              isFetchingModels={isFetchingModels}
+                            />
+                          </div>
+
+                          {isStudioGenerating && forgeStreamText && (
+                            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-600 font-mono max-h-24 overflow-y-auto">
+                              Streaming... ({forgeStreamText.length} chars received)
+                            </div>
+                          )}
+
+                          <Button
+                            onClick={handleStudioGenerate}
+                            disabled={isStudioGenerating}
+                            className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white py-6 text-lg shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                          >
+                            {isStudioGenerating ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
+                            {isStudioGenerating ? "Generating..." : "Generate Greeting"}
+                          </Button>
+
+                          {studioGeneratedGreeting && !isStudioGenerating && (
+                            <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-bold tracking-widest text-emerald-700 uppercase">Generated Greeting</h4>
+                                <div className="flex items-center gap-2">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-emerald-600" onClick={() => copyToClipboard(studioGeneratedGreeting)}>
+                                    <Copy className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <Textarea
+                                value={studioGeneratedGreeting}
+                                onChange={(e) => setStudioGeneratedGreeting(e.target.value)}
+                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px]"
+                              />
+                              <Button
+                                onClick={handleStudioAppendToCard}
+                                className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
+                              >
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add to Card's Alternate Greetings
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      {/* Adapt Card — paste off-platform card text and rewrite to style guide */}
+                      <TabsContent value="adapt" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500/20 via-cyan-500 to-cyan-500/20"></div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Adapt Card</h3>
+                          </div>
+
+                          <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-6 mb-6">
+                            <h4 className="text-lg font-medium text-cyan-900 mb-2">Import & Rewrite to a Style</h4>
+                            <p className="text-cyan-700 text-sm">
+                              Paste raw character card text you started off-platform (any format — JSON, bracketed, W++, plain text). Pick a style guide, and the AI will rewrite every prose field to match — preserving the character's identity but transforming the voice.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="adaptRaw" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Paste Card Text <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <Textarea
+                              id="adaptRaw"
+                              placeholder="Paste your character card here — JSON, bracketed format, W++, or plain text all work..."
+                              value={adaptRawText}
+                              onChange={(e) => setAdaptRawText(e.target.value)}
+                              className="bg-[#f9f8f6] hover:bg-white focus:bg-white border-[#e5e4e2] rounded-xl min-h-[200px] font-mono text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Style Guide to Adapt To <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <select
+                              value={adaptSelectedGuide}
+                              onChange={(e) => setAdaptSelectedGuide(e.target.value)}
+                              className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/50 focus-visible:border-cyan-600 transition-all"
+                            >
+                              <option value="" disabled>Pick a style guide...</option>
+                              {guides.map((g) => (
+                                <option key={g.id} value={g.id}>{g.title}</option>
+                              ))}
+                            </select>
+                            {guides.length === 0 && (
+                              <p className="text-xs text-amber-600 mt-1">You need to save a style guide in the Library first.</p>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <ModelSelector
+                              sectionId="forge_generate"
+                              globalProvider={provider}
+                              globalModels={apiModels}
+                              sectionConfigs={sectionConfigs}
+                              setSectionConfigs={setSectionConfigs}
+                              availableModels={availableModels}
+                              isFetchingModels={isFetchingModels}
+                            />
+                          </div>
+
+                          {isAdapting && forgeStreamText && (
+                            <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-xl text-xs text-cyan-600 font-mono max-h-24 overflow-y-auto">
+                              Streaming... ({forgeStreamText.length} chars received)
+                            </div>
+                          )}
+
+                          <Button
+                            onClick={handleAdaptCard}
+                            disabled={isAdapting}
+                            className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white py-6 text-lg shadow-md shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                          >
+                            {isAdapting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
+                            {isAdapting ? "Adapting..." : "Adapt to Style"}
+                          </Button>
+
+                          {adaptedCard && !isAdapting && (
+                            <div className="space-y-4 pt-4 border-t border-[#e5e4e2]">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-bold tracking-widest text-cyan-700 uppercase">Adapted Card</h4>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleAdaptGenerateGreeting}
+                                    disabled={isAdapting}
+                                    className="rounded-full border-[#e5e4e2] hover:bg-cyan-50 hover:text-cyan-700"
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" />
+                                    New Greeting
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleLoadAdaptedCard}
+                                    className="rounded-full border-[#e5e4e2] hover:bg-cyan-50 hover:text-cyan-700"
+                                  >
+                                    <FileText className="w-3 h-3 mr-1" />
+                                    Load into Preview
+                                  </Button>
+                                </div>
+                              </div>
+
+                              <div className="space-y-3">
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Name</span>
+                                  <p className="text-lg font-serif font-medium text-slate-900">{adaptedCard.name}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Description</span>
+                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.description}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Personality</span>
+                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.personality}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">First Message</span>
+                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{adaptedCard.first_mes}</p>
+                                </div>
+                                {adaptedCard.alternate_greetings && adaptedCard.alternate_greetings.length > 0 && (
+                                  <div>
+                                    <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Alternate Greetings ({adaptedCard.alternate_greetings.length})</span>
+                                    {adaptedCard.alternate_greetings.map((g, idx) => (
+                                      <p key={idx} className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto mt-2">
+                                        <span className="text-xs text-slate-400 font-bold">Greeting {idx + 2}:</span> {g}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
                       </TabsContent>
 
                       {/* Output Preview */}
