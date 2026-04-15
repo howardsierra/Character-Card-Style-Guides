@@ -1809,6 +1809,15 @@ export default function App() {
 
   return (
     <div className="flex flex-col md:flex-row h-screen w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
+      {/* Always-mounted file input, shared by Corpus Ingestion's Browse and Library's Import Guide */}
+      <input
+        type="file"
+        multiple
+        accept=".png,.json,.pdf,.docx"
+        className="hidden"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+      />
       {/* Sidebar / Topbar */}
       <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2] flex flex-col z-10 shrink-0">
         <div className="p-4 md:p-8 flex justify-between items-center md:block">
@@ -1878,15 +1887,7 @@ export default function App() {
                     <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
                       Drag and drop PNG, JSON, PDF, or DOCX files here, or click to browse your computer.
                     </p>
-                    <input
-                      type="file"
-                      multiple
-                      accept=".png,.json,.pdf,.docx"
-                      className="hidden"
-                      ref={fileInputRef}
-                      onChange={handleFileUpload}
-                    />
-                    <Button 
+                    <Button
                       className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105" 
                       disabled={isParsing}
                       onClick={(e) => {
