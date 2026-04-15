@@ -947,18 +947,193 @@ export default function App() {
   };
 
   const exportPDF = async () => {
-    if (!guideRef.current) return;
-    const opt = {
-      margin: 15,
-      filename: 'style-guide.pdf',
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
-    };
+    if (!currentGuide) return;
     try {
-      const html2pdfModule = await import('html2pdf.js');
-      const html2pdf = (html2pdfModule.default || html2pdfModule) as any;
-      await html2pdf().set(opt).from(guideRef.current).save();
+      // Render the PDF directly from the markdown source via jsPDF.
+      // Avoids html2canvas, which cannot parse Tailwind v4's oklch() colors.
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const marginX = 18;
+      const marginY = 20;
+      const contentWidth = pageWidth - marginX * 2;
+      let y = marginY;
+
+      const hexToRgb = (hex: string): [number, number, number] => {
+        const h = hex.replace('#', '');
+        return [
+          parseInt(h.slice(0, 2), 16),
+          parseInt(h.slice(2, 4), 16),
+          parseInt(h.slice(4, 6), 16),
+        ];
+      };
+
+      const ensureSpace = (needed: number) => {
+        if (y + needed > pageHeight - marginY) {
+          doc.addPage();
+          y = marginY;
+        }
+      };
+
+      const writeBlock = (
+        text: string,
+        opts: {
+          size: number;
+          font: 'helvetica' | 'times';
+          style: 'normal' | 'bold' | 'italic' | 'bolditalic';
+          color: string;
+          indent?: number;
+          lineHeight?: number;
+          spaceBefore?: number;
+          spaceAfter?: number;
+        }
+      ) => {
+        const indent = opts.indent ?? 0;
+        const lineHeight = opts.lineHeight ?? opts.size * 0.42;
+        if (opts.spaceBefore) y += opts.spaceBefore;
+        doc.setFont(opts.font, opts.style);
+        doc.setFontSize(opts.size);
+        const [r, g, b] = hexToRgb(opts.color);
+        doc.setTextColor(r, g, b);
+        const wrapped = doc.splitTextToSize(text, contentWidth - indent);
+        for (const line of wrapped) {
+          ensureSpace(lineHeight);
+          doc.text(line, marginX + indent, y);
+          y += lineHeight;
+        }
+        if (opts.spaceAfter) y += opts.spaceAfter;
+      };
+
+      // Strip common inline markdown that we don't render with formatting
+      const stripInline = (s: string) =>
+        s
+          .replace(/\*\*(.+?)\*\*/g, '$1')
+          .replace(/__(.+?)__/g, '$1')
+          .replace(/(^|\s)\*(?!\s)(.+?)\*/g, '$1$2')
+          .replace(/(^|\s)_(?!\s)(.+?)_/g, '$1$2')
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+
+      const title =
+        guides.find(g => g.id === currentGuideId)?.title ||
+        `Style Guide - ${new Date().toLocaleDateString()}`;
+
+      // Cover title
+      writeBlock(title, {
+        size: 22,
+        font: 'times',
+        style: 'bold',
+        color: '#8B3A3A',
+        spaceAfter: 6,
+      });
+
+      const lines = currentGuide.split('\n');
+      let inCodeBlock = false;
+      for (const raw of lines) {
+        const line = raw.replace(/\s+$/, '');
+
+        // Fenced code blocks
+        if (/^```/.test(line)) {
+          inCodeBlock = !inCodeBlock;
+          y += 2;
+          continue;
+        }
+        if (inCodeBlock) {
+          writeBlock(line || ' ', {
+            size: 9,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#334155',
+            indent: 4,
+          });
+          continue;
+        }
+
+        if (!line.trim()) {
+          y += 3;
+          continue;
+        }
+
+        if (line.startsWith('### ')) {
+          writeBlock(stripInline(line.slice(4)), {
+            size: 13,
+            font: 'times',
+            style: 'bold',
+            color: '#1a1a1a',
+            spaceBefore: 4,
+            spaceAfter: 2,
+          });
+        } else if (line.startsWith('## ')) {
+          writeBlock(stripInline(line.slice(3)), {
+            size: 16,
+            font: 'times',
+            style: 'bold',
+            color: '#8B3A3A',
+            spaceBefore: 6,
+            spaceAfter: 3,
+          });
+        } else if (line.startsWith('# ')) {
+          writeBlock(stripInline(line.slice(2)), {
+            size: 19,
+            font: 'times',
+            style: 'bold',
+            color: '#8B3A3A',
+            spaceBefore: 8,
+            spaceAfter: 4,
+          });
+        } else if (/^[-*+]\s+/.test(line)) {
+          const content = stripInline(line.replace(/^[-*+]\s+/, ''));
+          writeBlock(`\u2022  ${content}`, {
+            size: 10.5,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#1e293b',
+            indent: 5,
+          });
+        } else if (/^\d+\.\s+/.test(line)) {
+          const match = line.match(/^(\d+)\.\s+(.*)$/);
+          const content = match ? stripInline(match[2]) : stripInline(line);
+          const prefix = match ? `${match[1]}.  ` : '';
+          writeBlock(`${prefix}${content}`, {
+            size: 10.5,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#1e293b',
+            indent: 5,
+          });
+        } else if (line.startsWith('> ')) {
+          writeBlock(stripInline(line.slice(2)), {
+            size: 10.5,
+            font: 'times',
+            style: 'italic',
+            color: '#475569',
+            indent: 6,
+          });
+        } else {
+          writeBlock(stripInline(line), {
+            size: 10.5,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#1e293b',
+          });
+        }
+      }
+
+      // Page numbers
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`${i} / ${pageCount}`, pageWidth - marginX, pageHeight - 8, { align: 'right' });
+      }
+
+      const filename =
+        title.replace(/[^a-z0-9]/gi, '_').toLowerCase().replace(/_+/g, '_').replace(/^_|_$/g, '') + '.pdf';
+      doc.save(filename);
     } catch (err) {
       console.error("Failed to export PDF:", err);
       alert("Failed to export PDF. Please try again.");
