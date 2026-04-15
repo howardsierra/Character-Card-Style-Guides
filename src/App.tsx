@@ -522,68 +522,173 @@ export default function App() {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length) return;
     setIsParsing(true);
-    
+
     const newCards: CharacterCard[] = [];
     const newGuides: SavedGuide[] = [];
-    
+    const skipped: { name: string; reason: string }[] = [];
+
+    const pickGuideContent = (obj: any): string | null => {
+      if (!obj || typeof obj !== 'object') return null;
+      // Common field names other tools use for style-guide-like text
+      const candidates = ['content', 'text', 'body', 'guide', 'styleGuide', 'style_guide', 'markdown', 'value'];
+      for (const key of candidates) {
+        const v = obj[key];
+        if (typeof v === 'string' && v.trim().length > 20) return v;
+      }
+      return null;
+    };
+
     for (let i = 0; i < e.target.files.length; i++) {
+      const file = e.target.files[i];
       try {
-        const file = e.target.files[i];
-        
-        // Check if it's a Style Guide JSON
-        if (file.type === "application/json" || file.name.endsWith(".json")) {
-          const text = await file.text();
-          const parsed = JSON.parse(text);
-          if (parsed.title && parsed.content) {
-            newGuides.push(parsed as SavedGuide);
-            continue;
-          }
-        }
-        
-        // Check if it's a PDF Style Guide
-        if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
-          const text = await parsePdfToText(file);
+        const lowerName = file.name.toLowerCase();
+
+        // Plain-text guide formats (.md, .markdown, .txt)
+        if (/\.(md|markdown|txt)$/.test(lowerName)) {
+          const text = (await file.text()).trim();
           if (text) {
             newGuides.push({
               id: Date.now().toString() + i,
-              title: file.name.replace(/\.pdf$/i, ''),
+              title: file.name.replace(/\.(md|markdown|txt)$/i, ''),
               content: text,
               date: new Date().toISOString(),
               versions: []
             });
             continue;
           }
+          skipped.push({ name: file.name, reason: 'file was empty' });
+          continue;
         }
 
-        // Check if it's a DOCX Style Guide
-        if (file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" || file.name.endsWith(".docx")) {
-          const text = await parseDocxToText(file);
-          if (text) {
+        // JSON — could be a guide, a character card, or a card-card_v2 export
+        if (file.type === "application/json" || lowerName.endsWith(".json")) {
+          const text = await file.text();
+          let parsed: any;
+          try {
+            parsed = JSON.parse(text);
+          } catch (err) {
+            skipped.push({ name: file.name, reason: 'invalid JSON' });
+            continue;
+          }
+
+          // 1) StyleForge-native guide export: { title, content, ... }
+          if (parsed && typeof parsed === 'object' && parsed.content && typeof parsed.content === 'string') {
+            newGuides.push({
+              id: parsed.id || Date.now().toString() + i,
+              title: parsed.title || file.name.replace(/\.json$/i, ''),
+              content: parsed.content,
+              date: parsed.date || new Date().toISOString(),
+              versions: Array.isArray(parsed.versions) ? parsed.versions : []
+            });
+            continue;
+          }
+
+          // 2) Plain JSON string body used as the guide
+          if (typeof parsed === 'string' && parsed.trim().length > 20) {
             newGuides.push({
               id: Date.now().toString() + i,
-              title: file.name.replace(/\.docx$/i, ''),
-              content: text,
+              title: file.name.replace(/\.json$/i, ''),
+              content: parsed,
               date: new Date().toISOString(),
               versions: []
             });
             continue;
           }
+
+          // 3) Some other tool's shape with a guide-ish string field
+          const altContent = pickGuideContent(parsed);
+          if (altContent) {
+            newGuides.push({
+              id: Date.now().toString() + i,
+              title: parsed.title || parsed.name || file.name.replace(/\.json$/i, ''),
+              content: altContent,
+              date: new Date().toISOString(),
+              versions: []
+            });
+            continue;
+          }
+
+          // 4) Fall through to character-card parsing (handles chara_card_v2, etc.)
+          try {
+            const card = await parseFile(file);
+            if (card && card.name) {
+              newCards.push(card);
+              continue;
+            }
+          } catch {
+            /* fall through */
+          }
+          skipped.push({ name: file.name, reason: 'unrecognized JSON schema' });
+          continue;
         }
-        
-        const card = await parseFile(file);
-        if (card && card.name) {
-          newCards.push(card);
+
+        // PDF — extract text and save as a guide
+        if (file.type === "application/pdf" || lowerName.endsWith(".pdf")) {
+          try {
+            const text = await parsePdfToText(file);
+            if (text) {
+              newGuides.push({
+                id: Date.now().toString() + i,
+                title: file.name.replace(/\.pdf$/i, ''),
+                content: text,
+                date: new Date().toISOString(),
+                versions: []
+              });
+              continue;
+            }
+            skipped.push({ name: file.name, reason: 'PDF had no extractable text (scanned image?)' });
+          } catch (err: any) {
+            skipped.push({ name: file.name, reason: `PDF parse failed: ${err?.message || 'unknown error'}` });
+          }
+          continue;
         }
-      } catch (err) {
-        console.error("Failed to parse file", e.target.files[i].name, err);
+
+        // DOCX — extract text and save as a guide
+        if (
+          file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+          lowerName.endsWith(".docx")
+        ) {
+          try {
+            const text = await parseDocxToText(file);
+            if (text) {
+              newGuides.push({
+                id: Date.now().toString() + i,
+                title: file.name.replace(/\.docx$/i, ''),
+                content: text,
+                date: new Date().toISOString(),
+                versions: []
+              });
+              continue;
+            }
+            skipped.push({ name: file.name, reason: 'DOCX had no extractable text' });
+          } catch (err: any) {
+            skipped.push({ name: file.name, reason: `DOCX parse failed: ${err?.message || 'unknown error'}` });
+          }
+          continue;
+        }
+
+        // PNG or anything else: treat as a character card
+        try {
+          const card = await parseFile(file);
+          if (card && card.name) {
+            newCards.push(card);
+          } else {
+            skipped.push({ name: file.name, reason: 'parsed card had no name' });
+          }
+        } catch (err: any) {
+          skipped.push({ name: file.name, reason: err?.message || 'unsupported file type' });
+        }
+      } catch (err: any) {
+        console.error("Failed to parse file", file.name, err);
+        skipped.push({ name: file.name, reason: err?.message || 'unknown error' });
       }
     }
-    
+
     if (newCards.length > 0) {
       setCards((prev) => [...prev, ...newCards]);
       alert(`Imported ${newCards.length} character card(s) to Corpus Ingestion!`);
     }
-    
+
     if (newGuides.length > 0) {
       setGuides((prev) => [...newGuides, ...prev]);
       alert(`Imported ${newGuides.length} style guide(s) to the Library!`);
@@ -591,9 +696,14 @@ export default function App() {
     }
 
     if (newCards.length === 0 && newGuides.length === 0) {
-      alert("No valid character cards or style guides found in the uploaded files.");
+      const detail = skipped.length
+        ? `\n\nSkipped:\n${skipped.map(s => `\u2022 ${s.name} — ${s.reason}`).join('\n')}`
+        : '';
+      alert(
+        `No valid character cards or style guides found. Supported: PNG/JSON character cards, or .md, .markdown, .txt, .json, .pdf, .docx style guides.${detail}`
+      );
     }
-    
+
     setIsParsing(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
@@ -1988,7 +2098,7 @@ export default function App() {
       <input
         type="file"
         multiple
-        accept=".png,.json,.pdf,.docx"
+        accept=".png,.json,.pdf,.docx,.md,.markdown,.txt"
         className="hidden"
         ref={fileInputRef}
         onChange={handleFileUpload}
@@ -2060,7 +2170,7 @@ export default function App() {
                     </div>
                     <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Select Character Cards</h3>
                     <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
-                      Drag and drop PNG, JSON, PDF, or DOCX files here, or click to browse your computer.
+                      Drag and drop PNG, JSON, PDF, DOCX, MD, or TXT files here, or click to browse your computer.
                     </p>
                     <Button
                       className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105" 
