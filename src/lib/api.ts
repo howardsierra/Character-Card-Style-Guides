@@ -1334,3 +1334,112 @@ export async function generateCharacterImage(
     throw err;
   }
 }
+
+
+export async function generateAlternateGreeting(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: CharacterCard,
+  existingGreetings: string[],
+  model: string,
+  onChunk: (text: string) => void,
+  vibe?: string,
+  guide?: string
+): Promise<string> {
+  let prompt = `Generate a brand new, unique alternate greeting for the character ${card.name}.
+Do NOT use or repeat any of these existing greetings:
+${existingGreetings.map(g => '- ' + g).join('\
+')}
+
+Character details:
+${card.description ? 'Description: ' + card.description : ''}
+${card.personality ? 'Personality: ' + card.personality : ''}
+${card.scenario ? 'Scenario: ' + card.scenario : ''}
+`;
+
+  if (vibe) {
+    prompt += '\
+User requested tone/vibe for this greeting: ' + vibe;
+  }
+  if (guide) {
+    prompt += '\
+Style Guidelines:\
+' + guide;
+  }
+
+  prompt += '\
+\
+Write ONLY the new greeting text. Do not include introductory text, labels, or extra quotes.';
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    'You are an expert roleplay character creator and writer.',
+    false,
+    2048,
+    model
+  );
+
+  onChunk(responseText);
+  return responseText;
+}
+
+
+export async function adaptCardToStyleGuide(
+  provider: AIProvider,
+  keys: ApiKeys,
+  rawText: string,
+  guideContent: string,
+  model: string,
+  onChunk: (text: string) => void
+): Promise<CharacterCard> {
+  const prompt = `You are an expert AI character creator and writer.
+Your task is to take the following character text/details and adapt it perfectly to the provided Style Guide.
+
+### Target Style Guide:
+${guideContent}
+
+### Character Details to Adapt:
+${rawText}
+
+Rewrite the character's description, personality, scenario, first message, etc. to perfectly match what the Style Guide requires.
+Do not omit details, just reformat and rewrite them in the requested style.
+
+You MUST return a valid JSON object matching this structure:
+{
+  "name": "Character Name",
+  "description": "Adapted description...",
+  "personality": "Adapted personality...",
+  "scenario": "Adapted scenario...",
+  "first_mes": "Adapted first message/greeting..."
+}
+Do not add any markdown blocks around the JSON.`;
+
+  onChunk('Adapting card to style guide...');
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    'You are an expert roleplay character creator and JSON formatter.',
+    true, // jsonMode
+    8192,
+    model
+  );
+
+  try {
+    const { parseJsonRobust } = await import('./parser');
+    const parsed = parseJsonRobust(responseText);
+    return {
+      name: parsed.name || 'Adapted Character',
+      description: parsed.description || '',
+      personality: parsed.personality || '',
+      scenario: parsed.scenario || '',
+      first_mes: parsed.first_mes || '',
+      alternate_greetings: parsed.alternate_greetings || []
+    };
+  } catch (e) {
+    console.error('Failed to parse adapted card JSON', e, responseText);
+    throw new Error('Failed to generate valid JSON for the adapted card.');
+  }
+}
