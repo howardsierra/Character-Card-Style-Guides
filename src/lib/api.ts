@@ -147,14 +147,11 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
         try {
           const headers: Record<string, string> = {};
           if (keys.openrouter) headers["Authorization"] = `Bearer ${keys.openrouter}`;
-          const url = provider === "openrouter-responses" 
-            ? "https://openrouter.ai/api/v1/responses" 
-            : "https://openrouter.ai/api/v1/models";
-          const res = await fetch(url, { headers });
-          if (!res.ok) throw new Error(`Failed to fetch OpenRouter models from ${url}`);
+          const res = await fetch("https://openrouter.ai/api/v1/models", { headers });
+          if (!res.ok) throw new Error("Failed to fetch OpenRouter models");
           const data = await res.json();
           if (!data || !data.data || !Array.isArray(data.data)) {
-            console.warn(`Unexpected OpenRouter models response from ${url}:`, data);
+            console.warn(`Unexpected OpenRouter models response:`, data);
             return [];
           }
           return data.data
