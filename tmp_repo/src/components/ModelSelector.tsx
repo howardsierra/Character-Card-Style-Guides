@@ -18,7 +18,6 @@ const ALL_PROVIDERS: { id: AIProvider; name: string }[] = [
   { id: "gemini", name: "Google Gemini" },
   { id: "anthropic", name: "Anthropic Claude" },
   { id: "openai", name: "OpenAI" },
-  { id: "openai-responses", name: "OpenAI (Responses)" },
   { id: "openrouter", name: "OpenRouter" },
   { id: "custom", name: "Custom Endpoint" }
 ];

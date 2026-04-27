@@ -74,16 +74,14 @@ function NavButton({ view, icon: Icon, label, currentView, setView }: any) {
     <button
       onClick={() => setView(view)}
       className={cn(
-        "flex-none md:w-full flex-row flex items-center justify-center md:justify-start gap-2 md:gap-3 px-4 md:px-4 py-2.5 md:py-3 rounded-full md:rounded-xl text-[13px] md:text-sm transition-all duration-300 snap-center md:snap-align-none overflow-hidden relative",
+        "flex-none md:w-full flex items-center gap-2 md:gap-3 px-3 py-2 md:px-4 md:py-3 rounded-xl text-sm font-medium transition-all duration-300",
         isActive 
-          ? "text-[#8B3A3A] bg-white md:bg-white shadow-sm md:shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-black/5 md:border-[#e5e4e2]" 
-          : "bg-transparent text-slate-500 hover:bg-black/5 hover:text-slate-900 border border-transparent"
+          ? "bg-white text-[#8B3A3A] shadow-sm border border-[#e5e4e2]" 
+          : "text-slate-600 hover:bg-white/50 hover:text-slate-900"
       )}
     >
-      <Icon className={cn("w-[18px] h-[18px] md:w-5 md:h-5 transition-transform duration-300 z-10", isActive ? "scale-110 text-[#8B3A3A]" : "")} strokeWidth={isActive ? 2.5 : 2} />
-      <span className={cn("z-10 whitespace-nowrap tracking-wide", isActive ? "font-bold md:font-semibold" : "font-medium")}>
-        {label}
-      </span>
+      <Icon className={cn("w-4 h-4 md:w-5 md:h-5", isActive ? "text-[#8B3A3A]" : "text-slate-400")} />
+      <span className="whitespace-nowrap">{label}</span>
     </button>
   );
 }
@@ -472,9 +470,8 @@ export default function App() {
   // Fetch models when key or provider changes
   useEffect(() => {
     const fetchProviderModels = async (p: AIProvider) => {
-      const keyName = p === "openai-responses" ? "openai" : p;
-      const key = p === "custom" ? apiKeys.customKey : apiKeys[keyName as keyof ApiKeys];
-      if (!key && p !== "gemini" && p !== "openai" && p !== "openai-responses" && p !== "anthropic" && p !== "openrouter") return;
+      const key = p === "custom" ? apiKeys.customKey : apiKeys[p as keyof ApiKeys];
+      if (!key && p !== "gemini" && p !== "openai" && p !== "anthropic" && p !== "openrouter") return;
       
       setIsFetchingModels(prev => ({ ...prev, [p]: true }));
       try {
@@ -505,10 +502,7 @@ export default function App() {
     // Fetch for any provider whose key changed
     if (apiKeys.gemini !== prevKeys.gemini) fetchProviderModels("gemini");
     if (apiKeys.anthropic !== prevKeys.anthropic) fetchProviderModels("anthropic");
-    if (apiKeys.openai !== prevKeys.openai) {
-      fetchProviderModels("openai");
-      fetchProviderModels("openai-responses");
-    }
+    if (apiKeys.openai !== prevKeys.openai) fetchProviderModels("openai");
     if (apiKeys.openrouter !== prevKeys.openrouter) fetchProviderModels("openrouter");
     if (apiKeys.customEndpoint !== prevKeys.customEndpoint || apiKeys.customKey !== prevKeys.customKey) {
       fetchProviderModels("custom");
@@ -516,7 +510,7 @@ export default function App() {
 
     // Initial fetch for all providers on mount
     if (prevKeys === apiKeys && prevProvider === provider) {
-      (["gemini", "anthropic", "openai", "openai-responses", "openrouter", "custom"] as AIProvider[]).forEach(p => {
+      (["gemini", "anthropic", "openai", "openrouter", "custom"] as AIProvider[]).forEach(p => {
         fetchProviderModels(p);
       });
     }
@@ -1989,7 +1983,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-[100dvh] w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
+    <div className="flex flex-col md:flex-row h-screen w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
       {/* Always-mounted file input, shared by Corpus Ingestion's Browse and Library's Import Guide */}
       <input
         type="file"
@@ -1999,12 +1993,12 @@ export default function App() {
         ref={fileInputRef}
         onChange={handleFileUpload}
       />
-      {/* Sidebar for Desktop / Topbar for Mobile */}
-      <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2]/80 flex flex-col z-20 shrink-0 shadow-sm md:shadow-none">
-        <div className="p-3 md:p-8 flex justify-between items-center md:block">
-          <div className="flex justify-between items-center md:items-start w-full">
+      {/* Sidebar / Topbar */}
+      <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2] flex flex-col z-10 shrink-0">
+        <div className="p-4 md:p-8 flex justify-between items-center md:block">
+          <div className="flex justify-between items-start w-full">
             <div>
-              <h1 className="text-xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
+              <h1 className="text-2xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
                 StyleForge
               </h1>
               <p className="hidden md:block text-xs font-medium tracking-widest uppercase text-slate-500 mt-2">
@@ -2015,23 +2009,22 @@ export default function App() {
               variant="ghost"
               size="icon"
               onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              className="rounded-full md:mt-0 opacity-70 hover:opacity-100"
+              className="rounded-full md:mt-0"
             >
               {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
             </Button>
           </div>
         </div>
         
-        {/* Desktop Nav */}
-        <nav className="hidden md:flex flex-col flex-1 px-4 space-y-1 overflow-y-auto">
-          <NavButton view="upload" icon={Upload} label="Ingestion" currentView={view} setView={setView} />
-          <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
+        <nav className="flex-row md:flex-col overflow-x-auto md:overflow-x-visible flex-none md:flex-1 px-2 md:px-4 pb-2 md:pb-0 space-x-2 md:space-x-0 md:space-y-1 flex no-scrollbar">
+          <NavButton view="upload" icon={Upload} label="Corpus Ingestion" currentView={view} setView={setView} />
+          <NavButton view="generate" icon={FileText} label="Current Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
-          <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
-          <NavButton view="image" icon={ImageIcon} label="Portrait" currentView={view} setView={setView} />
-          <NavButton view="universe" icon={Network} label="Universe" currentView={view} setView={setView} />
-          <NavButton view="script" icon={FileJson} label="Script" currentView={view} setView={setView} />
-          <NavButton view="settings" icon={Settings} label="Settings" currentView={view} setView={setView} />
+          <NavButton view="create" icon={Wand2} label="Card Forge" currentView={view} setView={setView} />
+          <NavButton view="image" icon={ImageIcon} label="Portrait Studio" currentView={view} setView={setView} />
+          <NavButton view="universe" icon={Network} label="Universe Map" currentView={view} setView={setView} />
+          <NavButton view="script" icon={FileJson} label="Script Forge" currentView={view} setView={setView} />
+          <NavButton view="settings" icon={Settings} label="Configuration" currentView={view} setView={setView} />
         </nav>
       </div>
 
@@ -4190,11 +4183,7 @@ export default function App() {
                     <div>
                       <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {(["gemini", "anthropic", "openrouter", "openai", "openai-responses", "custom"] as AIProvider[]).map((p) => {
-                          let label = p as string;
-                          if (p === "openai-responses") label = "OpenAI (Responses)";
-                          else if (p === "openrouter") label = "OpenRouter";
-                          return (
+                        {(["gemini", "anthropic", "openrouter", "openai", "custom"] as AIProvider[]).map((p) => (
                           <div
                             key={p}
                             className={cn(
@@ -4205,9 +4194,9 @@ export default function App() {
                             )}
                             onClick={() => setProvider(p)}
                           >
-                            <span className="font-medium capitalize tracking-wide">{label}</span>
+                            <span className="font-medium capitalize tracking-wide">{p}</span>
                           </div>
-                        )})}
+                        ))}
                       </div>
                     </div>
 
@@ -4270,7 +4259,7 @@ export default function App() {
                         </div>
 
                         <div className="space-y-2">
-                          <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key (shared with Responses API)</Label>
+                          <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key</Label>
                           <Input
                             id="openai"
                             type="password"
@@ -4281,7 +4270,7 @@ export default function App() {
                           />
                           {availableModels["openai"]?.length > 0 && (
                             <div className="mt-2">
-                              <Label htmlFor="openai-model" className="text-slate-700 font-medium text-sm">Chat Completions Model</Label>
+                              <Label htmlFor="openai-model" className="text-slate-700 font-medium text-sm">Model</Label>
                               <select
                                 id="openai-model"
                                 value={apiModels["openai"] || ""}
@@ -4289,21 +4278,6 @@ export default function App() {
                                 className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
                               >
                                 {availableModels["openai"].map(m => (
-                                  <option key={m.id} value={m.id}>{m.name}</option>
-                                ))}
-                              </select>
-                            </div>
-                          )}
-                          {availableModels["openai-responses"]?.length > 0 && (
-                            <div className="mt-2 py-1">
-                              <Label htmlFor="openai-responses-model" className="text-slate-700 font-medium text-sm">Responses API Model</Label>
-                              <select
-                                id="openai-responses-model"
-                                value={apiModels["openai-responses"] || ""}
-                                onChange={(e) => setApiModels({ ...apiModels, "openai-responses": e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm shadow-sm"
-                              >
-                                {availableModels["openai-responses"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
                                 ))}
                               </select>
@@ -4519,21 +4493,6 @@ export default function App() {
             )}
           </div>
         </ScrollArea>
-      </div>
-
-      {/* Mobile Bottom Nav */}
-      <div className="md:hidden flex-none border-t border-[#e5e4e2] bg-[#f9f8f6]/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)] z-30 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
-        <nav className="flex overflow-x-auto px-4 py-2 space-x-1.5 no-scrollbar snap-x snap-mandatory">
-          <NavButton view="upload" icon={Upload} label="Ingestion" currentView={view} setView={setView} />
-          <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
-          <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
-          <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
-          <NavButton view="image" icon={ImageIcon} label="Portrait" currentView={view} setView={setView} />
-          <NavButton view="universe" icon={Network} label="Universe" currentView={view} setView={setView} />
-          <NavButton view="script" icon={FileJson} label="Script" currentView={view} setView={setView} />
-          <NavButton view="settings" icon={Settings} label="Settings" currentView={view} setView={setView} />
-          <div className="w-1 flex-none" aria-hidden="true" />
-        </nav>
       </div>
     </div>
   );

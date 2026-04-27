@@ -2,7 +2,7 @@ import { GoogleGenAI } from "@google/genai";
 import { jsonrepair } from "jsonrepair";
 import { CharacterCard } from "./parser";
 
-export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "openai-responses" | "custom";
+export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "custom";
 
 export interface ApiKeys {
   gemini: string;
@@ -20,48 +20,87 @@ export interface AIModel {
 
 const customMaxCompletionSupport = new Map<string, boolean>();
 
-export function parseJsonRobust(text: string): any {
-  const cleanText = text.trim();
-  try { return JSON.parse(cleanText); } catch (e) {}
-  try { return JSON.parse(jsonrepair(cleanText)); } catch (e) {}
-  
-  let extracted = cleanText;
-  const match = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (match) {
-    extracted = match[1].trim();
-    try { return JSON.parse(extracted); } catch (e) {}
-    try { return JSON.parse(jsonrepair(extracted)); } catch (e) {}
-  }
-  
-  const firstBrace = cleanText.indexOf('{');
-  const firstBracket = cleanText.indexOf('[');
-  let startIdx = -1;
-  if (firstBrace !== -1 && firstBracket !== -1) startIdx = Math.min(firstBrace, firstBracket);
-  else if (firstBrace !== -1) startIdx = firstBrace;
-  else if (firstBracket !== -1) startIdx = firstBracket;
-  
-  if (startIdx !== -1) {
-    const fromStart = cleanText.substring(startIdx);
-    try { return JSON.parse(jsonrepair(fromStart)); } catch (e) {}
-    
-    const isObj = cleanText[startIdx] === '{';
-    const lastChar = isObj ? cleanText.lastIndexOf('}') : cleanText.lastIndexOf(']');
-    if (lastChar > startIdx) {
-      const bounded = cleanText.substring(startIdx, lastChar + 1);
-      try { return JSON.parse(jsonrepair(bounded)); } catch (e) {}
-    }
-  }
-  
-  if (startIdx !== -1) {
-    return JSON.parse(jsonrepair(cleanText.substring(startIdx)));
-  }
-  return JSON.parse(jsonrepair(cleanText));
-}
-
 function isUnsupportedMaxCompletionError(errMsg: string): boolean {
   const normalized = errMsg.toLowerCase();
   return normalized.includes("max_completion_tokens") &&
     (normalized.includes("unsupported") || normalized.includes("unknown") || normalized.includes("invalid"));
+}
+
+function findBalancedJSON(text: string, startFrom: number = 0): { value: string; endIndex: number } | null {
+  const openers = new Set(['{', '[']);
+  for (let i = startFrom; i < text.length; i++) {
+    const ch = text[i];
+    if (!openers.has(ch)) continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (escaped) { escaped = false; continue; }
+      if (c === '\\' && inString) { escaped = true; continue; }
+      if (c === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (c === '{' || c === '[') depth++;
+      if (c === '}' || c === ']') depth--;
+      if (depth === 0) {
+        return { value: text.substring(i, j + 1), endIndex: j + 1 };
+      }
+    }
+    // Braces never balanced — return from opener to end so jsonrepair can attempt to fix truncated JSON
+    return { value: text.substring(i), endIndex: text.length };
+  }
+  return null;
+}
+
+function extractJSON(text: string): unknown {
+  // Strategy 1: Extract from markdown code blocks (handles ```json, ```JSON, ```js, bare ``` etc.)
+  const codeBlockMatch = text.match(/```(?:\w+)?\s*\n?([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    try {
+      return JSON.parse(jsonrepair(codeBlockMatch[1].trim()));
+    } catch (e) {
+      // Fall through to strategy 2
+    }
+  }
+
+  // Strategy 2: Try each balanced JSON structure in order (skips prose braces like {from your idea})
+  let searchFrom = 0;
+  while (searchFrom < text.length) {
+    const result = findBalancedJSON(text, searchFrom);
+    if (!result) break;
+    try {
+      return JSON.parse(jsonrepair(result.value.trim()));
+    } catch (e) {
+      searchFrom = result.endIndex;
+      continue;
+    }
+  }
+
+  // Strategy 3: First opener to last closer — handles unescaped quotes in string values
+  // that cause the balanced scanner to close prematurely
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    try {
+      return JSON.parse(jsonrepair(text.substring(firstBrace, lastBrace + 1).trim()));
+    } catch (e) {
+      // Fall through
+    }
+  }
+  const firstBracket = text.indexOf('[');
+  const lastBracket = text.lastIndexOf(']');
+  if (firstBracket !== -1 && lastBracket > firstBracket) {
+    try {
+      return JSON.parse(jsonrepair(text.substring(firstBracket, lastBracket + 1).trim()));
+    } catch (e) {
+      // Fall through
+    }
+  }
+
+  // Strategy 4: Try the raw text with jsonrepair as last resort
+  return JSON.parse(jsonrepair(text.trim()));
 }
 
 export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<AIModel[]> {
@@ -109,8 +148,7 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
           return defaultModels;
         }
       }
-      case "openai":
-      case "openai-responses": {
+      case "openai": {
         const defaultModels = [
           { id: "gpt-4o", name: "GPT-4o" },
           { id: "gpt-4o-mini", name: "GPT-4o Mini" },
@@ -248,6 +286,60 @@ Analyze the provided character data deeply. Look for recurring patterns in:
 
 Output ONLY the Markdown document. Make it look professional and attractive.`;
 
+async function fetchWithRetry(input: RequestInfo | URL, init?: RequestInit, retries = 3, timeoutMs = 120_000): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(input, { ...init, signal: controller.signal });
+      clearTimeout(timer);
+      return res;
+    } catch (e: any) {
+      clearTimeout(timer);
+      const isTimeout = e?.name === "AbortError";
+      const isNetwork = e instanceof TypeError;
+      if (attempt === retries || (!isTimeout && !isNetwork)) {
+        if (isTimeout) throw new Error("The AI provider took too long to respond. Please try again.");
+        if (isNetwork) throw new Error("Network connection failed. Check your internet and try again.");
+        throw e;
+      }
+      await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+    }
+  }
+  throw new Error("fetchWithRetry: unreachable");
+}
+
+async function readSSEStream(res: Response, onChunk?: (chunk: string) => void): Promise<string> {
+  const reader = res.body!.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+  let buffer = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line.startsWith("data: ")) continue;
+      const payload = line.slice(6).trim();
+      if (payload === "[DONE]") continue;
+      try {
+        const parsed = JSON.parse(payload);
+        // OpenAI-compatible format
+        const delta = parsed.choices?.[0]?.delta?.content;
+        if (delta) { full += delta; onChunk?.(full); continue; }
+        // Anthropic format
+        if (parsed.type === "content_block_delta") {
+          const text = parsed.delta?.text;
+          if (text) { full += text; onChunk?.(full); }
+        }
+      } catch {}
+    }
+  }
+  return full;
+}
+
 async function callAIProvider(
   provider: AIProvider,
   keys: ApiKeys,
@@ -255,13 +347,14 @@ async function callAIProvider(
   systemPrompt: string,
   jsonMode: boolean = false,
   maxTokens: number = 131072,
-  model?: string
+  model?: string,
+  onChunk?: (partialText: string) => void
 ): Promise<string> {
   try {
     let providerMaxTokens = maxTokens;
-    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 8192);
+    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 16384);
     else if (provider === "openai") providerMaxTokens = Math.min(maxTokens, 16384);
-    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 8192);
+    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 16384);
 
     const finalSystemPrompt = jsonMode 
       ? `${systemPrompt}\n\nIMPORTANT: You must respond ONLY with valid JSON. Do not include any conversational text, markdown formatting, or explanations outside the JSON object. Ensure all strings are properly escaped.`
@@ -277,6 +370,19 @@ async function callAIProvider(
         if (jsonMode) {
           config.responseMimeType = "application/json";
         }
+        if (onChunk) {
+          let full = "";
+          const stream = await ai.models.generateContentStream({
+            model: model || "gemini-3.1-pro-preview",
+            contents: prompt,
+            config,
+          });
+          for await (const chunk of stream) {
+            const text = chunk.text || "";
+            if (text) { full += text; onChunk(full); }
+          }
+          return full;
+        }
         const response = await ai.models.generateContent({
           model: model || "gemini-3.1-pro-preview",
           contents: prompt,
@@ -285,7 +391,14 @@ async function callAIProvider(
         return response.text || "";
       }
       case "anthropic": {
-        const res = await fetch("https://api.anthropic.com/v1/messages", {
+        const anthropicBody: any = {
+          model: model || "claude-3-opus-20240229",
+          max_tokens: providerMaxTokens,
+          system: finalSystemPrompt,
+          messages: [{ role: "user", content: prompt }],
+        };
+        if (onChunk) anthropicBody.stream = true;
+        const res = await fetchWithRetry("https://api.anthropic.com/v1/messages", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -293,118 +406,130 @@ async function callAIProvider(
             "anthropic-version": "2023-06-01",
             "anthropic-dangerous-direct-browser-access": "true"
           },
-          body: JSON.stringify({
-            model: model || "claude-3-opus-20240229",
-            max_tokens: providerMaxTokens,
-            system: finalSystemPrompt,
-            messages: [{ role: "user", content: prompt }],
-          }),
+          body: JSON.stringify(anthropicBody),
         });
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
           const errMsg = errData.error?.message || errData.message || res.statusText;
           throw new Error(`Anthropic API error: ${errMsg}`);
         }
+        if (onChunk && res.body) {
+          return readSSEStream(res, onChunk);
+        }
         const data = await res.json();
         return data.content[0].text;
       }
       case "openai": {
-        const body: any = {
-          model: model || "gpt-4-turbo-preview",
-          max_completion_tokens: providerMaxTokens,
-          messages: [
-            { role: "system", content: finalSystemPrompt },
-            { role: "user", content: prompt }
-          ],
+        const makeOpenAIBody = (useMaxCompletionTokens: boolean) => {
+          const body: any = {
+            model: model || "gpt-4-turbo-preview",
+            messages: [
+              { role: "system", content: finalSystemPrompt },
+              { role: "user", content: prompt }
+            ],
+          };
+          if (useMaxCompletionTokens) {
+            body.max_completion_tokens = providerMaxTokens;
+          } else {
+            body.max_tokens = providerMaxTokens;
+          }
+          if (jsonMode) {
+            body.response_format = { type: "json_object" };
+          }
+          if (onChunk) body.stream = true;
+          return body;
         };
-        if (jsonMode) {
-          body.response_format = { type: "json_object" };
-        }
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openai}`,
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error?.message || errData.message || res.statusText;
-          throw new Error(`OpenAI API error: ${errMsg}`);
-        }
-        const data = await res.json();
-        const choice = data.choices?.[0];
-        if (!choice) {
-          throw new Error(`OpenAI returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
-        }
-        return choice.message?.content || choice.text || "";
-      }
-      case "openai-responses": {
-        const body: any = {
-          model: model || "gpt-4o",
-          max_completion_tokens: providerMaxTokens,
-          input: [
-            { role: "system", content: finalSystemPrompt },
-            { role: "user", content: prompt }
-          ],
+
+        const sendOpenAIRequest = async (useMaxCompletionTokens: boolean) => {
+          const res = await fetchWithRetry("https://api.openai.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${keys.openai}`,
+            },
+            body: JSON.stringify(makeOpenAIBody(useMaxCompletionTokens)),
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            const errMsg = errData.error?.message || errData.message || res.statusText;
+            return { ok: false as const, errMsg };
+          }
+          if (onChunk && res.body) {
+            const text = await readSSEStream(res, onChunk);
+            return { ok: true as const, data: { choices: [{ message: { content: text } }] } };
+          }
+          const data = await res.json();
+          return { ok: true as const, data };
         };
-        if (jsonMode) {
-          body.response_format = { type: "json_object" };
+
+        let openaiResult = await sendOpenAIRequest(true);
+        if (!openaiResult.ok && isUnsupportedMaxCompletionError(openaiResult.errMsg)) {
+          openaiResult = await sendOpenAIRequest(false);
         }
-        const res = await fetch("https://api.openai.com/v1/responses", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openai}`,
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error?.message || errData.message || res.statusText;
-          throw new Error(`OpenAI Responses API error: ${errMsg}`);
+        if (!openaiResult.ok) {
+          throw new Error(`OpenAI API error: ${openaiResult.errMsg}`);
         }
-        const data = await res.json();
-        const choice = data.choices?.[0];
-        if (!choice || !choice.message) {
-          // If the shape is slightly different, fallback gracefully to returning JSON stringified
-          if (data.output) return typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
-          throw new Error(`OpenAI Responses returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        const openaiChoice = openaiResult.data.choices?.[0];
+        if (!openaiChoice) {
+          throw new Error(`OpenAI returned no choices. Response: ${JSON.stringify(openaiResult.data).substring(0, 200)}`);
         }
-        return choice.message?.content || choice.text || "";
+        return openaiChoice.message?.content || openaiChoice.text || "";
       }
       case "openrouter": {
-        const body: any = {
-          model: model || "anthropic/claude-3-opus",
-          max_completion_tokens: providerMaxTokens,
-          messages: [
-            { role: "system", content: finalSystemPrompt },
-            { role: "user", content: prompt }
-          ],
+        const makeOpenRouterBody = (useMaxCompletionTokens: boolean) => {
+          const body: any = {
+            model: model || "anthropic/claude-3-opus",
+            messages: [
+              { role: "system", content: finalSystemPrompt },
+              { role: "user", content: prompt }
+            ],
+          };
+          if (useMaxCompletionTokens) {
+            body.max_completion_tokens = providerMaxTokens;
+          } else {
+            body.max_tokens = providerMaxTokens;
+          }
+          if (onChunk) body.stream = true;
+          return body;
         };
+
         // OpenRouter models vary in JSON mode support, rely on prompt + regex parsing
-        const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${keys.openrouter}`,
-            "HTTP-Referer": window.location.href,
-            "X-Title": "SillyTavern Style Guide Generator",
-          },
-          body: JSON.stringify(body),
-        });
-        if (!res.ok) {
-          const errData = await res.json().catch(() => ({}));
-          const errMsg = errData.error?.message || errData.message || res.statusText;
-          throw new Error(`OpenRouter API error: ${errMsg}`);
+        const sendOpenRouterRequest = async (useMaxCompletionTokens: boolean) => {
+          const res = await fetchWithRetry("https://openrouter.ai/api/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${keys.openrouter}`,
+              "HTTP-Referer": window.location.href,
+              "X-Title": "SillyTavern Style Guide Generator",
+            },
+            body: JSON.stringify(makeOpenRouterBody(useMaxCompletionTokens)),
+          });
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            const errMsg = errData.error?.message || errData.message || res.statusText;
+            return { ok: false as const, errMsg };
+          }
+          if (onChunk && res.body) {
+            const text = await readSSEStream(res, onChunk);
+            return { ok: true as const, data: { choices: [{ message: { content: text } }] } };
+          }
+          const data = await res.json();
+          return { ok: true as const, data };
+        };
+
+        let openrouterResult = await sendOpenRouterRequest(true);
+        if (!openrouterResult.ok && isUnsupportedMaxCompletionError(openrouterResult.errMsg)) {
+          openrouterResult = await sendOpenRouterRequest(false);
         }
-        const data = await res.json();
-        const choice = data.choices?.[0];
-        if (!choice) {
-          throw new Error(`OpenRouter returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        if (!openrouterResult.ok) {
+          throw new Error(`OpenRouter API error: ${openrouterResult.errMsg}`);
         }
-        return choice.message?.content || choice.text || "";
+        const openrouterChoice = openrouterResult.data.choices?.[0];
+        if (!openrouterChoice) {
+          throw new Error(`OpenRouter returned no choices. Response: ${JSON.stringify(openrouterResult.data).substring(0, 200)}`);
+        }
+        return openrouterChoice.message?.content || openrouterChoice.text || "";
       }
       case "custom": {
         const capabilityKey = keys.customEndpoint;
@@ -423,12 +548,13 @@ async function callAIProvider(
           } else {
             body.max_tokens = providerMaxTokens;
           }
+          if (onChunk) body.stream = true;
           // Custom endpoints vary in JSON mode support, rely on prompt + regex parsing
           return body;
         };
 
         const sendRequest = async (includeMaxCompletionTokens: boolean) => {
-          const res = await fetch(keys.customEndpoint, {
+          const res = await fetchWithRetry(keys.customEndpoint, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -441,6 +567,11 @@ async function callAIProvider(
             const errData = await res.json().catch(() => ({}));
             const errMsg = errData.error?.message || errData.message || res.statusText;
             return { ok: false as const, errMsg };
+          }
+
+          if (onChunk && res.body) {
+            const text = await readSSEStream(res, onChunk);
+            return { ok: true as const, data: { choices: [{ message: { content: text } }] } };
           }
 
           const data = await res.json();
@@ -556,7 +687,8 @@ export async function generateCharacterCard(
   template?: string,
   model?: string,
   firstMessageIdea?: string,
-  templateExample?: string
+  templateExample?: string,
+  onChunk?: (partialText: string) => void
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
   
@@ -636,7 +768,7 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
 
   const parseResponse = (text: string): CharacterCard => {
     try {
-      return parseJsonRobust(text);
+      return extractJSON(text) as CharacterCard;
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -650,8 +782,9 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    8192,
-    model
+    16384,
+    model,
+    onChunk
   );
   return parseResponse(responseText);
 }
@@ -742,15 +875,13 @@ ${templateExample}`;
 
   const parseResponse = (text: string) => {
     try {
-      const parsed = parseJsonRobust(text);
-      
-      if (!Array.isArray(parsed)) {
+      const parsed = extractJSON(text);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object') {
         const possibleArray = Object.values(parsed).find(val => Array.isArray(val));
         if (possibleArray) return possibleArray;
-        return [];
       }
-      
-      return parsed;
+      return [];
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -914,7 +1045,7 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
 
   const parseResponse = (text: string): UniverseData => {
     try {
-      return parseJsonRobust(text);
+      return extractJSON(text) as UniverseData;
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
@@ -946,7 +1077,8 @@ export async function vibeForgeCard(
   slots: { name: string; description: string; value: string }[],
   model?: string,
   templateExample?: string,
-  styleGuide?: string
+  styleGuide?: string,
+  onChunk?: (partialText: string) => void
 ): Promise<{ name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> }> {
   const slotsPrompt = slots.map(s => `- ${s.name}: ${s.description}`).join("\n");
 
@@ -983,12 +1115,13 @@ ${slotsPrompt}
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    8192,
-    model
+    16384,
+    model,
+    onChunk
   );
-  
+
   try {
-    return parseJsonRobust(response);
+    return extractJSON(response) as { name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> };
   } catch (e: any) {
     console.error("Failed to parse vibe forge JSON:", response);
     console.error("Parse error:", e);
@@ -1043,7 +1176,7 @@ ${slotsPrompt}`;
   );
 
   try {
-    return parseJsonRobust(responseText);
+    return extractJSON(responseText) as Record<string, string>;
   } catch (e: any) {
     console.error("Failed to parse auto-fill response:", responseText);
     console.error("Parse error:", e);
@@ -1128,7 +1261,7 @@ ${JSON.stringify(card, null, 2)}`;
   const response = await callAIProvider(provider, keys, prompt, "You are a music supervisor and character analyst.", true, 500, model);
   
   try {
-    const parsed = parseJsonRobust(response);
+    const parsed = extractJSON(response) as any;
     return {
       title: parsed.title || "Unknown Title",
       artist: parsed.artist || "Unknown Artist",
@@ -1137,6 +1270,122 @@ ${JSON.stringify(card, null, 2)}`;
   } catch (e) {
     console.error("Failed to parse theme song JSON:", response);
     throw new Error("Failed to generate a valid theme song suggestion.");
+  }
+}
+
+export async function generateAlternateGreeting(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: CharacterCard,
+  existingGreetings: string[],
+  model?: string,
+  onChunk?: (partialText: string) => void,
+  vibePrompt?: string,
+  styleGuide?: string
+): Promise<string> {
+  const existingList = [card.first_mes, ...existingGreetings]
+    .map((g, i) => `--- Greeting ${i + 1} ---\n${g}`)
+    .join("\n\n");
+
+  let prompt = `You are an expert character roleplay writer. Generate a NEW alternate first message / greeting for the following character.
+
+CHARACTER:
+Name: ${card.name}
+Description: ${card.description}
+Personality: ${card.personality}
+Scenario: ${card.scenario}
+
+EXISTING GREETINGS (do NOT repeat these — create something fresh with a different scenario, mood, or setting):
+${existingList}
+`;
+
+  if (vibePrompt && vibePrompt.trim()) {
+    prompt += `
+USER DIRECTION FOR THE NEW GREETING (follow this closely — this describes the scenario, mood, or situation the user wants):
+"${vibePrompt}"
+`;
+  }
+
+  if (styleGuide && styleGuide.trim()) {
+    prompt += `
+STYLE GUIDE (dictates writing voice, prose style, tone, formatting conventions, and stylistic techniques — follow this strictly):
+${styleGuide}
+`;
+  }
+
+  prompt += `
+Write a single new greeting that:
+- Matches the character's voice, tone, and personality exactly
+- Presents a different situation, scenario, or mood from the existing greetings
+- ${vibePrompt ? "Strictly follows the user direction above" : "Is roughly the same length and detail level as the existing greetings"}
+- ${styleGuide ? "Strictly follows the prose conventions of the Style Guide" : "Uses the same formatting conventions (asterisks for actions, quotes for dialogue, etc.)"}
+
+Output ONLY the greeting text. No labels, no JSON, no explanations.`;
+
+  return callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character roleplay writer. Output only the greeting text.",
+    false,
+    8192,
+    model,
+    onChunk
+  );
+}
+
+export async function adaptCardToStyleGuide(
+  provider: AIProvider,
+  keys: ApiKeys,
+  rawText: string,
+  styleGuide: string,
+  model?: string,
+  onChunk?: (partialText: string) => void
+): Promise<CharacterCard> {
+  const prompt = `You are an expert character card editor. A user has pasted raw character card text (could be JSON, bracketed format, W++, Ali:Chat, plain text, or any other format). Your job is to EXTRACT the character and REWRITE all prose fields to match the provided Style Guide.
+
+RAW INPUT (this may be messy, partial, or in any format — parse it intelligently):
+"""
+${rawText}
+"""
+
+STYLE GUIDE (dictates writing voice, prose style, tone, formatting conventions, and stylistic techniques — follow this strictly for every prose field):
+${styleGuide}
+
+YOUR TASK:
+1. Extract the character's identity (name, core traits, scenario, first message) from the raw input.
+2. REWRITE each prose field (description, personality, scenario, first_mes, mes_example) to STRICTLY follow the Style Guide's voice, prose style, formatting, and conventions.
+3. Preserve the character's core identity, relationships, and scenario — only change the WRITING STYLE.
+4. If any field is missing from the input, invent a stylistically-consistent value that fits the character.
+
+OUTPUT FORMAT:
+You MUST output ONLY valid JSON matching this structure. Do not include any other text, explanations, or markdown formatting outside the JSON object.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
+{
+  "name": "string",
+  "description": "string",
+  "personality": "string",
+  "scenario": "string",
+  "first_mes": "string",
+  "mes_example": "string"
+}`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert character card editor. Output only valid JSON.",
+    true,
+    16384,
+    model,
+    onChunk
+  );
+
+  try {
+    return extractJSON(responseText) as CharacterCard;
+  } catch (e: any) {
+    console.error("Failed to parse adapted card JSON:", responseText);
+    throw new Error(`AI did not return valid JSON: ${e.message}`);
   }
 }
 

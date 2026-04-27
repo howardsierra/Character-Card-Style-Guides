@@ -1,0 +1,65 @@
+49:  return (
+62:  return (
+82:      if (saved === "dark" || saved === "light") return saved;
+83:      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+85:    return "light";
+133:    return { currentProvider, currentModel };
+315:    if (!hasHydratedAutosave) return;
+374:      if (!key && p !== "gemini" && p !== "openai" && p !== "anthropic" && p !== "openrouter") return;
+383:            return { ...prev, [p]: models[0].id };
+385:          return prev;
+423:    if (!e.target.files?.length) return;
+507:    if (!file) return;
+515:        return newCards;
+523:    if (!file) return;
+566:    return slots.map(slot => {
+570:        return { ...slot, value: mappedValue };
+572:      return slot;
+578:    if (!file) return;
+632:    if (cards.length === 0) return;
+651:    if (selectedGuides.size < 2) return;
+674:    if (!currentGuide) return;
+677:    if (!title) return; // Cancelled
+692:    if (!currentGuideId || !editedGuideContent) return;
+700:        return {
+707:      return g;
+715:    if (!currentGuideId) return;
+723:        return {
+730:      return g;
+738:    if (!guideRef.current) return;
+750:    if (!currentGuide) return;
+796:      return;
+803:        return;
+807:        return;
+823:                return { ...s, value: existing ? existing.value : "" };
+825:              return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
+830:        return;
+842:              return { ...s, value: existing ? existing.value : "" };
+844:            return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
+858:      if (view !== "create") return;
+875:    return () => window.removeEventListener('keydown', handleKeyDown);
+879:    if (!universeSelectedGuide && universeSelectedCards.size === 0) return;
+900:    if (!forgeName || !forgeConcept || !forgeSelectedGuide) return;
+903:    if (!guide) return;
+938:    if (!forgedCard) return;
+955:    if (!imagePrompt) return;
+964:        return;
+986:      return;
+989:    if (!card) return;
+1007:    if (!studioImagePrompt) return;
+1016:        return;
+1035:    if (!studioSelectedCard || !studioCharacterImage) return;
+1038:        return {
+1046:      return c;
+1070:    if (forgeSlots.length === 0 || forgeConcept.trim() !== "" || isSuggestingArchetype) return;
+1081:      return;
+1084:    if (!guide) return;
+1114:        return newSlots;
+1127:      return;
+1140:          return { ...slot, value: filledData[slot.name] };
+1142:        return slot;
+1153:    if (!forgedCard) return;
+1181:    if (!forgedCard) return;
+1200:    if (!universeData) return;
+1207:  return (
+2599:                                    return next;

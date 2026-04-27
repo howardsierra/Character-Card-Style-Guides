@@ -1,0 +1,290 @@
+39:    <div className="group relative inline-flex items-center ml-1.5 align-middle">
+40:      <Info className="w-4 h-4 text-slate-400 hover:text-[#8B3A3A] transition-colors cursor-help" />
+41:      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-800 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-xl pointer-events-none font-normal leading-relaxed text-left">
+43:        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
+54:      className={cn(
+61:      <Icon className={cn("w-4 h-4 md:w-5 md:h-5", isActive ? "text-[#8B3A3A]" : "text-slate-400")} />
+62:      <span className="whitespace-nowrap">{label}</span>
+715:    <div className="flex flex-col md:flex-row h-screen w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
+717:      <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2] flex flex-col z-10 shrink-0">
+718:        <div className="p-4 md:p-8 flex justify-between items-center md:block">
+720:            <h1 className="text-2xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
+723:            <p className="hidden md:block text-xs font-medium tracking-widest uppercase text-slate-500 mt-2">
+729:        <nav className="flex-row md:flex-col overflow-x-auto md:overflow-x-visible flex-none md:flex-1 px-2 md:px-4 pb-2 md:pb-0 space-x-2 md:space-x-0 md:space-y-1 flex no-scrollbar">
+740:      <div className="flex-1 flex flex-col overflow-hidden relative">
+741:        <ScrollArea className="flex-1 px-4 py-6 md:px-12 md:py-10">
+742:          <div className="max-w-5xl mx-auto">
+753:                  className="space-y-6 md:space-y-8"
+755:                  <div className="space-y-2">
+756:                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Corpus Ingestion</h2>
+757:                    <p className="text-slate-500 text-base md:text-lg font-light">
+763:                    className="border-dashed border-[1.5px] border-[#d1d0ce] bg-white/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:border-[#8B3A3A]/30 cursor-pointer"
+766:                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+767:                      <Upload className="w-5 h-5 md:w-6 md:h-6 text-[#8B3A3A]" />
+769:                    <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Select Character Cards</h3>
+770:                    <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
+777:                      className="hidden"
+782:                      className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105" 
+789:                      {isParsing ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Plus className="w-5 h-5 mr-2" />}
+798:                      className="space-y-6"
+800:                      <div className="flex items-end justify-between border-b border-[#e5e4e2] pb-4">
+802:                          <h3 className="text-2xl font-serif font-medium">Analyzed Subjects</h3>
+803:                          <p className="text-sm text-slate-500 mt-1">{cards.length} cards loaded</p>
+808:                          className="bg-slate-900 hover:bg-slate-800 text-white rounded-full px-6"
+810:                          {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <FileText className="w-4 h-4 mr-2" />}
+815:                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+817:                          <div key={i} className="group relative bg-white border border-[#e5e4e2] rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between min-h-[120px]">
+818:                            <div className="flex gap-4">
+820:                                className="relative w-16 h-16 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0 border border-[#e5e4e2] flex items-center justify-center group/image cursor-pointer" 
+825:                                  <img src={card.image} alt={card.name} className="w-full h-full object-cover" />
+827:                                  <ImageIcon className="w-6 h-6 text-slate-400" />
+829:                                <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover/image:opacity-100 transition-opacity">
+830:                                  <Upload className="w-4 h-4 text-white" />
+835:                                  className="hidden" 
+840:                              <div className="flex-1 min-w-0">
+841:                                <h4 className="font-serif font-medium text-lg truncate pr-8">{card.name || "Unknown"}</h4>
+842:                                <p className="text-xs text-slate-500 mt-1 truncate">
+848:                            <div className="mt-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+851:                                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-600 transition-colors"
+854:                                <FileJson className="w-4 h-4" />
+858:                                className="p-1.5 bg-slate-100 hover:bg-slate-200 rounded-md text-slate-600 transition-colors"
+861:                                {exportingCard === card ? <Loader2 className="w-4 h-4 animate-spin" /> : <ImageIcon className="w-4 h-4" />}
+866:                              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
+870:                              <Trash2 className="w-4 h-4" />
+888:                  className="space-y-6 md:space-y-8"
+890:                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
+891:                    <div className="space-y-2">
+892:                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">
+895:                      <p className="text-slate-500 text-base md:text-lg font-light">
+899:                    <div className="flex flex-wrap gap-2 md:gap-3">
+903:                            <Button variant="outline" onClick={() => setIsEditingGuide(false)} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+904:                              <X className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+907:                            <Button onClick={updateCurrentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+908:                              <Save className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+914:                            <Button variant="outline" onClick={() => setShowVersions(!showVersions)} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+915:                              <History className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+918:                            <Button variant="outline" onClick={() => { setEditedGuideContent(currentGuide || ""); setIsEditingGuide(true); }} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+919:                              <Pencil className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+922:                            <Button onClick={exportJSON} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4" variant="outline">
+923:                              <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+926:                            <Button onClick={exportPDF} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+927:                              <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+934:                          <Button variant="outline" onClick={saveCurrentGuide} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+935:                            <Check className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+938:                          <Button onClick={exportJSON} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4" variant="outline">
+939:                            <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+942:                          <Button onClick={exportPDF} disabled={!currentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+943:                            <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+952:                    <div className="bg-white border border-[#e5e4e2] rounded-xl p-4 md:p-6 shadow-sm">
+953:                      <h3 className="text-lg md:text-xl font-serif font-medium text-slate-900 mb-4">Version History</h3>
+954:                      <div className="space-y-3 md:space-y-4 max-h-64 overflow-y-auto pr-2">
+957:                            <div key={v.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 md:p-4 border border-[#e5e4e2] rounded-lg bg-slate-50 gap-3 sm:gap-0">
+959:                                <p className="font-medium text-slate-900 text-sm md:text-base">Version {arr.length - i}</p>
+960:                                <p className="text-xs md:text-sm text-slate-500">{new Date(v.date).toLocaleString()}</p>
+962:                              <Button variant="outline" size="sm" onClick={() => revertToVersion(v)} className="rounded-full text-[#8B3A3A] border-[#e5e4e2] hover:bg-white w-full sm:w-auto">
+963:                                <History className="w-4 h-4 mr-2" />
+969:                          <p className="text-slate-500 text-sm">No previous versions available.</p>
+976:                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+977:                      <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+978:                      <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Synthesizing Authorial Voice...</h3>
+979:                      <p className="text-slate-500 mt-2 max-w-md text-sm md:text-base">
+984:                    <div className="bg-white border border-[#e5e4e2] rounded-xl shadow-sm overflow-hidden">
+986:                        <div className="p-4 md:p-8">
+990:                            className="min-h-[500px] md:min-h-[800px] font-mono text-xs md:text-sm p-4 md:p-6 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+994:                        <div className="p-6 md:p-16 min-h-[500px] md:min-h-[800px]" ref={guideRef}>
+995:                          <div className="prose prose-slate max-w-none prose-headings:font-serif prose-headings:font-medium prose-h1:text-center prose-h1:text-3xl md:prose-h1:text-5xl prose-h1:text-[#8B3A3A] prose-h1:mb-2 prose-h2:text-[#8B3A3A] prose-h2:border-b prose-h2:border-[#e5e4e2] prose-h2:pb-2 md:prose-h2:pb-3 prose-h2:mt-8 md:prose-h2:mt-12 prose-h2:text-2xl md:prose-h2:text-3xl prose-h3:text-xl md:prose-h3:text-2xl prose-h3:mt-6 md:prose-h3:mt-8 prose-p:leading-relaxed prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-900 prose-strong:font-semibold">
+1002:                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+1003:                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+1004:                        <FileText className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
+1006:                      <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">No Guide Synthesized</h3>
+1007:                      <p className="text-slate-500 mt-2 max-w-md text-sm md:text-base">
+1010:                      <Button className="mt-6 md:mt-8 rounded-full bg-slate-900 text-white px-6 md:px-8" onClick={() => setView("upload")}>
+1026:                  className="space-y-6 md:space-y-8"
+1028:                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
+1029:                    <div className="space-y-2">
+1030:                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Library</h2>
+1031:                      <p className="text-slate-500 text-base md:text-lg font-light">
+1035:                    <div className="flex flex-wrap gap-2 md:gap-3">
+1039:                        className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+1041:                        <Upload className="w-4 h-4 mr-2" />
+1047:                        className="rounded-full bg-slate-900 text-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+1049:                        {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Merge className="w-4 h-4 mr-2" />}
+1056:                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+1057:                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+1058:                        <BookOpen className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
+1060:                      <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Library Empty</h3>
+1061:                      <p className="text-slate-500 mt-2 text-sm md:text-base">
+1066:                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+1070:                          className={cn(
+1076:                          <div className="flex items-start justify-between mb-4">
+1077:                            <div className="flex items-center gap-4">
+1078:                              <div className={cn(
+1082:                                {selectedGuides.has(guide.id) && <Check className="w-3 h-3 text-white" />}
+1085:                                <h3 className="font-serif font-medium text-xl text-slate-900">{guide.title}</h3>
+1086:                                <p className="text-xs text-slate-500 font-medium tracking-wide uppercase mt-1">
+1093:                              className="w-8 h-8 rounded-full hover:bg-red-50 text-slate-400 hover:text-red-600 flex items-center justify-center transition-colors"
+1095:                              <Trash2 className="w-4 h-4" />
+1098:                          <p className="text-sm text-slate-600 line-clamp-3 leading-relaxed mb-6">
+1101:                          <div className="flex justify-end">
+1104:                              className="rounded-full border-[#e5e4e2] hover:bg-[#f9f8f6]"
+1132:                  className="space-y-6 md:space-y-8"
+1134:                  <div className="border-b border-[#e5e4e2] pb-6">
+1135:                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Card Forge</h2>
+1136:                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+1141:                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
+1143:                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6">
+1144:                      <div className="flex items-center justify-between mb-2">
+1145:                        <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900">Character Details</h3>
+1146:                        <div className="flex items-center gap-2">
+1152:                            className="h-8 px-2 text-slate-600 border-[#e5e4e2] hover:bg-slate-50"
+1155:                            <Undo2 className="w-4 h-4" />
+1162:                            className="h-8 px-2 text-slate-600 border-[#e5e4e2] hover:bg-slate-50"
+1165:                            <Redo2 className="w-4 h-4" />
+1170:                      <div className="space-y-2">
+1171:                        <Label htmlFor="guideSelect" className="text-slate-700 font-medium flex items-center">
+1172:                          Style Guide Base <span className="text-red-500 ml-1">*</span>
+1179:                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+1187:                          <p className="text-xs text-amber-600 mt-1">You need to save a style guide in the Library first.</p>
+1191:                      <div className="space-y-2">
+1192:                        <Label htmlFor="templateSelect" className="text-slate-700 font-medium flex items-center">
+1193:                          Card Template <span className="text-slate-400 font-normal ml-2 text-xs">(Optional)</span>
+1196:                        <div className="flex gap-2">
+1201:                            className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+1219:                            className="h-10 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50"
+1223:                            <Upload className="w-4 h-4" />
+1228:                            className="hidden"
+1235:                      <div className="space-y-2">
+1236:                        <Label htmlFor="charName" className="text-slate-700 font-medium flex items-center">
+1237:                          Character Name <span className="text-red-500 ml-1">*</span>
+1245:                          className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1249:                      <div className="space-y-2 relative">
+1250:                        <Label htmlFor="charConcept" className="text-slate-700 font-medium flex items-center justify-between">
+1251:                          <span className="flex items-center">
+1252:                            Core Concept / Archetype <span className="text-red-500 ml-1">*</span>
+1260:                            className="h-6 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-2"
+1262:                            {isSuggestingArchetype ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
+1271:                          className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1277:                        <div className="flex items-center justify-center py-8 text-slate-500">
+1278:                          <Loader2 className="w-6 h-6 animate-spin mr-2" />
+1283:                          <div key={index} className="space-y-2">
+1284:                            <Label htmlFor={`slot-${index}`} className="text-slate-700 font-medium flex items-center">
+1297:                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] min-h-[100px]"
+1306:                        className="w-full rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white py-6 text-lg shadow-md shadow-[#8B3A3A]/20 transition-all"
+1308:                        {isForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
+1314:                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm flex flex-col h-full">
+1315:                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
+1316:                        <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900">Forged Output</h3>
+1321:                            className="rounded-full border-[#e5e4e2] hover:bg-[#f9f8f6] text-[#8B3A3A] w-full sm:w-auto"
+1323:                            <Download className="w-4 h-4 mr-2" />
+1330:                        <div className="flex-1 flex flex-col items-center justify-center text-center py-8 md:py-12">
+1331:                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+1332:                          <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Forging Character...</h4>
+1333:                          <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
+1338:                        <ScrollArea className="flex-1 -mx-4 px-4">
+1339:                          <div className="space-y-6 pb-4">
+1341:                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Name</h4>
+1342:                              <p className="text-slate-900 font-medium">{forgedCard.name}</p>
+1346:                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Description</h4>
+1347:                              <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+1353:                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Personality</h4>
+1354:                              <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+1360:                              <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">First Message</h4>
+1361:                              <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+1368:                                <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Scenario</h4>
+1369:                                <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+1377:                                <h4 className="text-xs font-bold tracking-wider text-slate-400 uppercase mb-1">Example Messages</h4>
+1378:                                <div className="bg-slate-50 p-4 rounded-xl text-sm text-slate-700 whitespace-pre-wrap font-mono">
+1386:                        <div className="flex-1 flex flex-col items-center justify-center text-center py-12">
+1387:                          <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
+1388:                            <Wand2 className="w-6 h-6 text-slate-400" />
+1390:                          <h4 className="text-lg font-serif font-medium text-slate-900">Awaiting Input</h4>
+1391:                          <p className="text-slate-500 mt-2 max-w-xs text-sm">
+1409:                  className="space-y-6 md:space-y-8 h-full flex flex-col"
+1411:                  <div className="border-b border-[#e5e4e2] pb-6 shrink-0">
+1412:                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Universe Map</h2>
+1413:                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+1418:                  <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+1419:                    <div className="flex flex-col md:flex-row gap-4 items-end">
+1420:                      <div className="space-y-2 flex-1 w-full">
+1421:                        <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
+1428:                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+1439:                        className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
+1441:                        {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
+1447:                  <div className="flex-1 min-h-[500px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
+1449:                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/80 backdrop-blur-sm z-20">
+1450:                        <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+1451:                        <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Analyzing Relationships...</h4>
+1452:                        <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
+1459:                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
+1460:                        <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
+1461:                          <Network className="w-6 h-6 text-slate-400" />
+1463:                        <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
+1464:                        <p className="text-slate-500 mt-2 max-w-xs text-sm">
+1481:                  className="space-y-6 md:space-y-8 max-w-3xl"
+1483:                  <div className="border-b border-[#e5e4e2] pb-6">
+1484:                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Configuration</h2>
+1485:                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+1490:                  <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-6 md:space-y-8">
+1492:                      <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
+1493:                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+1497:                            className={cn(
+1505:                            <span className="font-medium capitalize tracking-wide">{p}</span>
+1511:                    <div className="pt-6 md:pt-8 border-t border-[#e5e4e2]">
+1512:                      <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4 md:mb-6">API Credentials</h3>
+1513:                      <div className="space-y-4 md:space-y-6">
+1514:                        <div className="space-y-2">
+1515:                          <Label htmlFor="gemini" className="text-slate-700 font-medium">Gemini API Key</Label>
+1522:                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1524:                          <p className="text-xs text-slate-500">Leave blank to use the default AI Studio key.</p>
+1526:                            <div className="mt-2">
+1527:                              <Label htmlFor="gemini-model" className="text-slate-700 font-medium text-sm">Model</Label>
+1532:                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+1542:                        <div className="space-y-2">
+1543:                          <Label htmlFor="anthropic" className="text-slate-700 font-medium">Anthropic API Key</Label>
+1550:                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1553:                            <div className="mt-2">
+1554:                              <Label htmlFor="anthropic-model" className="text-slate-700 font-medium text-sm">Model</Label>
+1559:                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+1569:                        <div className="space-y-2">
+1570:                          <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key</Label>
+1577:                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1580:                            <div className="mt-2">
+1581:                              <Label htmlFor="openai-model" className="text-slate-700 font-medium text-sm">Model</Label>
+1586:                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+1596:                        <div className="space-y-2">
+1597:                          <Label htmlFor="openrouter" className="text-slate-700 font-medium">OpenRouter API Key</Label>
+1604:                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1607:                            <div className="mt-2">
+1608:                              <Label htmlFor="openrouter-model" className="text-slate-700 font-medium text-sm">Model</Label>
+1613:                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+1623:                        <div className="pt-6 mt-6 border-t border-[#e5e4e2] space-y-6">
+1624:                          <h4 className="font-medium text-slate-900">Custom API Endpoint</h4>
+1625:                          <div className="space-y-2">
+1626:                            <Label htmlFor="customEndpoint" className="text-slate-700 font-medium">Endpoint URL</Label>
+1632:                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1635:                          <div className="space-y-2">
+1636:                            <Label htmlFor="customKey" className="text-slate-700 font-medium">Custom API Key</Label>
+1642:                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+1646:                            <div className="mt-2">
+1647:                              <Label htmlFor="custom-model" className="text-slate-700 font-medium text-sm">Model</Label>
+1652:                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+1671:              <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none">
+1672:                <div id="export-card-container" className="bg-[#f9f8f6] p-8 rounded-3xl shadow-xl w-[800px] font-sans text-slate-900 border border-[#e5e4e2]">
+1673:                  <div className="border-b border-[#e5e4e2] pb-6 mb-6 flex items-center gap-6">
+1675:                      <div className="w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 border-2 border-white shadow-md">
+1676:                        <img src={exportingCard.image} alt={exportingCard.name} className="w-full h-full object-cover" />
+1680:                      <h1 className="text-4xl font-serif font-bold text-[#8B3A3A] mb-2">{exportingCard.name || "Unknown Character"}</h1>
+1681:                      {exportingCard.creator && <p className="text-sm font-medium text-slate-500 uppercase tracking-widest">By {exportingCard.creator}</p>}
+1685:                  <div className="space-y-6">
+1687:                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+1688:                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Description</h3>
+1689:                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.description}</div>
+1693:                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+1694:                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Personality</h3>
+1695:                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.personality}</div>
+1699:                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+1700:                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Scenario</h3>
+1701:                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.scenario}</div>
+1705:                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
+1706:                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">First Message</h3>
+1707:                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-4 rounded-xl border border-[#e5e4e2]">{exportingCard.first_mes}</div>
