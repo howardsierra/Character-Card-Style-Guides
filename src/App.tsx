@@ -17,6 +17,10 @@ import { motion, AnimatePresence } from "motion/react";
 import { toPng } from "html-to-image";
 import UniverseMap from "./components/UniverseMap";
 import { ModelSelector } from "./components/ModelSelector";
+
+function ConfiguredModelSelector(props: Omit<React.ComponentProps<typeof ModelSelector>, 'customEndpoints'> & { apiKeys: ApiKeys }) {
+  return <ModelSelector {...props} customEndpoints={props.apiKeys.customEndpoints} />;
+}
 import { useHistory } from "./hooks/useHistory";
 import localforage from "localforage";
 
@@ -117,6 +121,7 @@ export default function App() {
     openai: "",
     customEndpoint: "",
     customKey: "",
+    customEndpoints: [],
   });
 
   const [apiModels, setApiModels] = useState<Record<string, string>>({});
@@ -513,11 +518,19 @@ export default function App() {
     if (apiKeys.customEndpoint !== prevKeys.customEndpoint || apiKeys.customKey !== prevKeys.customKey) {
       fetchProviderModels("custom");
     }
+    if (apiKeys.customEndpoints !== prevKeys.customEndpoints) {
+      apiKeys.customEndpoints?.forEach(ep => {
+        fetchProviderModels(ep.id);
+      });
+    }
 
     // Initial fetch for all providers on mount
     if (prevKeys === apiKeys && prevProvider === provider) {
       (["gemini", "anthropic", "openai", "openai-responses", "openrouter", "custom"] as AIProvider[]).forEach(p => {
         fetchProviderModels(p);
+      });
+      apiKeys.customEndpoints?.forEach(ep => {
+        fetchProviderModels(ep.id);
       });
     }
 
@@ -2094,7 +2107,7 @@ export default function App() {
                           <p className="text-sm text-slate-500 mt-1">{cards.length} cards loaded</p>
                         </div>
                         <div className="flex items-center gap-4">
-                          <ModelSelector
+                          <ConfiguredModelSelector apiKeys={apiKeys}
                             sectionId="ingestion"
                             globalProvider={provider}
                             globalModels={apiModels}
@@ -2339,7 +2352,7 @@ export default function App() {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                      <ModelSelector
+                      <ConfiguredModelSelector apiKeys={apiKeys}
                         sectionId="library"
                         globalProvider={provider}
                         globalModels={apiModels}
@@ -2628,7 +2641,7 @@ export default function App() {
 
                           <div className="flex flex-col sm:flex-row sm:justify-end pt-4 gap-4 sm:items-center">
                             <div className="w-full sm:w-auto flex justify-start sm:justify-end">
-                              <ModelSelector
+                              <ConfiguredModelSelector apiKeys={apiKeys}
                                 sectionId="forge_vibe"
                                 globalProvider={provider}
                                 globalModels={apiModels}
@@ -2850,7 +2863,7 @@ export default function App() {
                             </Button>
                           </div>
                           <div className="flex justify-end">
-                            <ModelSelector
+                            <ConfiguredModelSelector apiKeys={apiKeys}
                               sectionId="forge_suggest"
                               globalProvider={provider}
                               globalModels={apiModels}
@@ -2878,7 +2891,7 @@ export default function App() {
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                             <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Character Details</h3>
                             <div className="flex justify-start sm:justify-end">
-                              <ModelSelector
+                              <ConfiguredModelSelector apiKeys={apiKeys}
                                 sectionId="forge_autofill"
                                 globalProvider={provider}
                                 globalModels={apiModels}
@@ -2982,7 +2995,7 @@ export default function App() {
 
                       <div className="flex flex-col gap-2 mt-4">
                         <div className="flex justify-end">
-                          <ModelSelector
+                          <ConfiguredModelSelector apiKeys={apiKeys}
                             sectionId="forge_generate"
                             globalProvider={provider}
                             globalModels={apiModels}
@@ -3125,7 +3138,7 @@ export default function App() {
                           </div>
 
                           <div className="space-y-2">
-                            <ModelSelector
+                            <ConfiguredModelSelector apiKeys={apiKeys}
                               sectionId="forge_generate"
                               globalProvider={provider}
                               globalModels={apiModels}
@@ -3226,7 +3239,7 @@ export default function App() {
                           </div>
 
                           <div className="space-y-2">
-                            <ModelSelector
+                            <ConfiguredModelSelector apiKeys={apiKeys}
                               sectionId="forge_generate"
                               globalProvider={provider}
                               globalModels={apiModels}
@@ -3391,7 +3404,7 @@ export default function App() {
                                   Character Portrait
                                 </h4>
                                 <div className="flex justify-start sm:justify-end">
-                                  <ModelSelector
+                                  <ConfiguredModelSelector apiKeys={apiKeys}
                                     sectionId="forge_image_prompt"
                                     globalProvider={provider}
                                     globalModels={apiModels}
@@ -3679,7 +3692,7 @@ export default function App() {
                         <Save className="w-4 h-4 mr-2" />
                         Save Draft
                       </Button>
-                      <ModelSelector
+                      <ConfiguredModelSelector apiKeys={apiKeys}
                         sectionId="forge_image"
                         globalProvider={provider}
                         globalModels={apiModels}
@@ -3733,7 +3746,7 @@ export default function App() {
                             </Label>
                             {studioSelectedCard && (
                               <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 w-full sm:w-auto">
-                                <ModelSelector
+                                <ConfiguredModelSelector apiKeys={apiKeys}
                                   sectionId="studio_prompt"
                                   globalProvider={provider}
                                   globalModels={apiModels}
@@ -3962,7 +3975,7 @@ export default function App() {
                         <Save className="w-4 h-4 mr-2" />
                         Save Draft
                       </Button>
-                      <ModelSelector
+                      <ConfiguredModelSelector apiKeys={apiKeys}
                         sectionId="universe"
                         globalProvider={provider}
                         globalModels={apiModels}
@@ -4089,7 +4102,7 @@ export default function App() {
                         <Save className="w-4 h-4 mr-2" />
                         Save Draft
                       </Button>
-                      <ModelSelector
+                      <ConfiguredModelSelector apiKeys={apiKeys}
                         sectionId="script"
                         globalProvider={provider}
                         globalModels={apiModels}
@@ -4339,42 +4352,145 @@ export default function App() {
                         </div>
 
                         <div className="pt-6 mt-6 border-t border-[#e5e4e2] space-y-6">
-                          <h4 className="font-medium text-slate-900">Custom API Endpoint</h4>
-                          <div className="space-y-2">
-                            <Label htmlFor="customEndpoint" className="text-slate-700 font-medium">Endpoint URL</Label>
-                            <Input
-                              id="customEndpoint"
-                              placeholder="https://your-api.com/v1/chat/completions"
-                              value={apiKeys.customEndpoint}
-                              onChange={(e) => setApiKeys({ ...apiKeys, customEndpoint: e.target.value })}
-                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
-                            />
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-medium text-slate-900">Custom API Endpoints</h4>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              className="rounded-full text-xs"
+                              onClick={() => {
+                                const id = `custom-${Date.now()}`;
+                                setApiKeys({
+                                  ...apiKeys,
+                                  customEndpoints: [
+                                    ...(apiKeys.customEndpoints || []),
+                                    { id, name: "New Endpoint", url: "", key: "" }
+                                  ]
+                                });
+                              }}
+                            >
+                              <Plus className="w-3 h-3 mr-1" />
+                              Add Endpoint
+                            </Button>
                           </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="customKey" className="text-slate-700 font-medium">Custom API Key</Label>
-                            <Input
-                              id="customKey"
-                              type="password"
-                              value={apiKeys.customKey}
-                              onChange={(e) => setApiKeys({ ...apiKeys, customKey: e.target.value })}
-                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
-                            />
-                          </div>
-                          {availableModels["custom"]?.length > 0 && (
-                            <div className="mt-2">
-                              <Label htmlFor="custom-model" className="text-slate-700 font-medium text-sm">Model</Label>
-                              <select
-                                id="custom-model"
-                                value={apiModels["custom"] || ""}
-                                onChange={(e) => setApiModels({ ...apiModels, custom: e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
-                              >
-                                {availableModels["custom"].map(m => (
-                                  <option key={m.id} value={m.id}>{m.name}</option>
-                                ))}
-                              </select>
+                          
+                          {/* Legacy Custom Endpoint */}
+                          <div className="p-4 border border-[#e5e4e2] rounded-xl space-y-4 bg-slate-50">
+                            <div className="flex items-center justify-between">
+                              <h5 className="text-sm font-semibold text-slate-700">Legacy Custom Endpoint</h5>
                             </div>
-                          )}
+                            <div className="space-y-2">
+                              <Label htmlFor="customEndpoint" className="text-slate-700 font-medium text-xs">Endpoint URL</Label>
+                              <Input
+                                id="customEndpoint"
+                                placeholder="https://your-api.com/v1/chat/completions"
+                                value={apiKeys.customEndpoint}
+                                onChange={(e) => setApiKeys({ ...apiKeys, customEndpoint: e.target.value })}
+                                className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="customKey" className="text-slate-700 font-medium text-xs">Custom API Key</Label>
+                              <Input
+                                id="customKey"
+                                type="password"
+                                value={apiKeys.customKey}
+                                onChange={(e) => setApiKeys({ ...apiKeys, customKey: e.target.value })}
+                                className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                              />
+                            </div>
+                            {availableModels["custom"]?.length > 0 && (
+                              <div className="mt-2">
+                                <Label htmlFor="custom-model" className="text-slate-700 font-medium text-xs">Model</Label>
+                                <select
+                                  id="custom-model"
+                                  value={apiModels["custom"] || ""}
+                                  onChange={(e) => setApiModels({ ...apiModels, custom: e.target.value })}
+                                  className="w-full mt-1 rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                >
+                                  {availableModels["custom"].map(m => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Dynamic Custom Endpoints */}
+                          {apiKeys.customEndpoints?.map((ep, index) => (
+                            <div key={ep.id} className="p-4 border border-[#e5e4e2] rounded-xl space-y-4 bg-slate-50 relative">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute top-2 right-2 text-slate-400 hover:text-red-500 rounded-full h-8 w-8"
+                                onClick={() => {
+                                  setApiKeys({
+                                    ...apiKeys,
+                                    customEndpoints: apiKeys.customEndpoints?.filter((_, i) => i !== index)
+                                  });
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                              <div className="space-y-2 pr-8">
+                                <Label htmlFor={`ep-name-${ep.id}`} className="text-slate-700 font-medium text-xs">Endpoint Name</Label>
+                                <Input
+                                  id={`ep-name-${ep.id}`}
+                                  placeholder="e.g. My Local LLM"
+                                  value={ep.name}
+                                  onChange={(e) => {
+                                    const newEndpoints = [...(apiKeys.customEndpoints || [])];
+                                    newEndpoints[index] = { ...ep, name: e.target.value };
+                                    setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
+                                  }}
+                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`ep-url-${ep.id}`} className="text-slate-700 font-medium text-xs">Endpoint URL</Label>
+                                <Input
+                                  id={`ep-url-${ep.id}`}
+                                  placeholder="https://your-api.com/v1/chat/completions"
+                                  value={ep.url}
+                                  onChange={(e) => {
+                                    const newEndpoints = [...(apiKeys.customEndpoints || [])];
+                                    newEndpoints[index] = { ...ep, url: e.target.value };
+                                    setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
+                                  }}
+                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`ep-key-${ep.id}`} className="text-slate-700 font-medium text-xs">Custom API Key</Label>
+                                <Input
+                                  id={`ep-key-${ep.id}`}
+                                  type="password"
+                                  value={ep.key}
+                                  onChange={(e) => {
+                                    const newEndpoints = [...(apiKeys.customEndpoints || [])];
+                                    newEndpoints[index] = { ...ep, key: e.target.value };
+                                    setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
+                                  }}
+                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                />
+                              </div>
+                              {availableModels[ep.id]?.length > 0 && (
+                                <div className="mt-2">
+                                  <Label htmlFor={`model-${ep.id}`} className="text-slate-700 font-medium text-xs">Model</Label>
+                                  <select
+                                    id={`model-${ep.id}`}
+                                    value={apiModels[ep.id] || ""}
+                                    onChange={(e) => setApiModels({ ...apiModels, [ep.id]: e.target.value })}
+                                    className="w-full mt-1 rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                  >
+                                    {availableModels[ep.id].map(m => (
+                                      <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>

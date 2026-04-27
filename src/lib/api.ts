@@ -2,7 +2,14 @@ import { GoogleGenAI } from "@google/genai";
 import { jsonrepair } from "jsonrepair";
 import { CharacterCard } from "./parser";
 
-export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "openai-responses" | "custom";
+export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "openai-responses" | "custom" | string;
+
+export interface CustomEndpoint {
+  id: string;
+  name: string;
+  url: string;
+  key: string;
+}
 
 export interface ApiKeys {
   gemini: string;
@@ -11,6 +18,7 @@ export interface ApiKeys {
   openai: string;
   customEndpoint: string;
   customKey: string;
+  customEndpoints?: CustomEndpoint[];
 }
 
 export interface AIModel {
@@ -191,8 +199,28 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
           return [{ id: "default", name: "Default Custom Model" }];
         }
       }
-      default:
+      default: {
+        if (provider.startsWith("custom-") && keys.customEndpoints) {
+          const ep = keys.customEndpoints.find(e => e.id === provider);
+          if (!ep || !ep.url || !ep.key) return [];
+          try {
+            const baseUrl = ep.url.replace(/\/chat\/completions\/?$/, "");
+            const res = await fetch(`${baseUrl}/models`, {
+              headers: { "Authorization": `Bearer ${ep.key}` }
+            });
+            if (!res.ok) throw new Error("Failed to fetch custom endpoint models");
+            const data = await res.json();
+            if (data && data.data && Array.isArray(data.data)) {
+              return data.data.map((m: any) => ({ id: m.id, name: m.id }));
+            }
+            throw new Error("Invalid format");
+          } catch (e) {
+            console.warn("Could not fetch custom models, using default", e);
+            return [{ id: "default", name: "Default Custom Model" }];
+          }
+        }
         return [];
+      }
     }
   } catch (error) {
     console.error(`Error fetching models for ${provider}:`, error);
@@ -467,8 +495,72 @@ async function callAIProvider(
 
         return result.data.choices[0].message.content;
       }
-      default:
+      default: {
+        if (provider.startsWith("custom-") && keys.customEndpoints) {
+          const ep = keys.customEndpoints.find(e => e.id === provider);
+          if (ep && ep.url && ep.key) {
+            const capabilityKey = ep.url;
+            const cachedSupport = customMaxCompletionSupport.get(capabilityKey);
+
+            const createBody = (includeMaxCompletionTokens: boolean) => {
+              const body: any = {
+                model: model || "default",
+                messages: [
+                  { role: "system", content: finalSystemPrompt },
+                  { role: "user", content: prompt }
+                ],
+              };
+              if (includeMaxCompletionTokens) {
+                body.max_completion_tokens = providerMaxTokens;
+              } else {
+                body.max_tokens = providerMaxTokens;
+              }
+              return body;
+            };
+
+            const sendRequest = async (includeMaxCompletionTokens: boolean) => {
+              const res = await fetch(ep.url, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${ep.key}`,
+                },
+                body: JSON.stringify(createBody(includeMaxCompletionTokens)),
+              });
+
+              if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                const errMsg = errData.error?.message || errData.message || res.statusText;
+                return { ok: false as const, errMsg };
+              }
+
+              const data = await res.json();
+              return { ok: true as const, data };
+            };
+
+            const shouldTryMaxCompletion = cachedSupport !== false;
+            let usedFallbackWithoutMaxCompletion = false;
+            let result = await sendRequest(shouldTryMaxCompletion);
+
+            if (!result.ok && shouldTryMaxCompletion && isUnsupportedMaxCompletionError(result.errMsg)) {
+              customMaxCompletionSupport.set(capabilityKey, false);
+              usedFallbackWithoutMaxCompletion = true;
+              result = await sendRequest(false);
+            }
+
+            if (!result.ok) {
+              throw new Error(`Custom API error: ${result.errMsg}`);
+            }
+
+            if (shouldTryMaxCompletion && !usedFallbackWithoutMaxCompletion) {
+              customMaxCompletionSupport.set(capabilityKey, true);
+            }
+
+            return result.data.choices[0].message.content;
+          }
+        }
         throw new Error("Unknown provider");
+      }
     }
   } catch (error) {
     console.error(`Error calling ${provider} API:`, error);

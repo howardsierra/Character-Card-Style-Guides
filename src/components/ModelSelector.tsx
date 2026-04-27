@@ -2,6 +2,13 @@ import React from 'react';
 import { Label } from './ui/label';
 import { AIProvider, AIModel } from '../lib/api';
 
+export interface CustomEndpoint {
+  id: string;
+  name: string;
+  url: string;
+  key: string;
+}
+
 interface ModelSelectorProps {
   sectionId: string;
   globalProvider: AIProvider;
@@ -10,11 +17,12 @@ interface ModelSelectorProps {
   setSectionConfigs: React.Dispatch<React.SetStateAction<Record<string, { provider: AIProvider; model: string }>>>;
   availableModels: Record<string, AIModel[]>;
   isFetchingModels: Record<string, boolean>;
-  allowedProviders?: AIProvider[];
+  allowedProviders?: string[];
   filterModels?: (model: AIModel) => boolean;
+  customEndpoints?: CustomEndpoint[];
 }
 
-const ALL_PROVIDERS: { id: AIProvider; name: string }[] = [
+const BASE_PROVIDERS: { id: string; name: string }[] = [
   { id: "gemini", name: "Google Gemini" },
   { id: "anthropic", name: "Anthropic Claude" },
   { id: "openai", name: "OpenAI" },
@@ -32,8 +40,14 @@ export function ModelSelector({
   availableModels,
   isFetchingModels,
   allowedProviders,
-  filterModels
+  filterModels,
+  customEndpoints
 }: ModelSelectorProps) {
+  const ALL_PROVIDERS = [...BASE_PROVIDERS];
+  if (customEndpoints) {
+    customEndpoints.forEach(ep => ALL_PROVIDERS.push({ id: ep.id, name: ep.name }));
+  }
+
   const config = sectionConfigs[sectionId];
   
   // Ensure the current provider is allowed
