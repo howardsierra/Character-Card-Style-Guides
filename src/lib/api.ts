@@ -439,7 +439,7 @@ async function callAIProvider(
         const body: any = {
           model: model || "anthropic/claude-3-opus",
           max_completion_tokens: providerMaxTokens,
-          messages: [
+          input: [
             { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
           ],
