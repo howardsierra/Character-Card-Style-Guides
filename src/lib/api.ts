@@ -412,7 +412,7 @@ async function callAIProvider(
       case "openrouter": {
         const body: any = {
           model: model || "anthropic/claude-3-opus",
-          max_completion_tokens: providerMaxTokens,
+          max_tokens: providerMaxTokens,
           messages: [
             { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
@@ -444,7 +444,7 @@ async function callAIProvider(
       case "openrouter-responses": {
         const body: any = {
           model: model || "anthropic/claude-3-opus",
-          max_completion_tokens: providerMaxTokens,
+          max_tokens: providerMaxTokens,
           input: [
             { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
