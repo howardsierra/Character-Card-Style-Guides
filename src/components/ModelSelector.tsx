@@ -28,6 +28,7 @@ const BASE_PROVIDERS: { id: string; name: string }[] = [
   { id: "openai", name: "OpenAI" },
   { id: "openai-responses", name: "OpenAI (Responses)" },
   { id: "openrouter", name: "OpenRouter" },
+  { id: "openrouter-responses", name: "OpenRouter (Responses)" },
   { id: "custom", name: "Custom Endpoint" }
 ];
 

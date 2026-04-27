@@ -142,7 +142,8 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
           return defaultModels;
         }
       }
-      case "openrouter": {
+      case "openrouter":
+      case "openrouter-responses": {
         try {
           const res = await fetch("https://openrouter.ai/api/v1/models");
           if (!res.ok) throw new Error("Failed to fetch OpenRouter models");
@@ -431,6 +432,39 @@ async function callAIProvider(
         const choice = data.choices?.[0];
         if (!choice) {
           throw new Error(`OpenRouter returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        }
+        return choice.message?.content || choice.text || "";
+      }
+      case "openrouter-responses": {
+        const body: any = {
+          model: model || "anthropic/claude-3-opus",
+          max_completion_tokens: providerMaxTokens,
+          messages: [
+            { role: "system", content: finalSystemPrompt },
+            { role: "user", content: prompt }
+          ],
+        };
+        // OpenRouter models vary in JSON mode support, rely on prompt + regex parsing
+        const res = await fetch("https://openrouter.ai/api/v1/responses", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${keys.openrouter}`,
+            "HTTP-Referer": window.location.href,
+            "X-Title": "SillyTavern Style Guide Generator",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error?.message || errData.message || res.statusText;
+          throw new Error(`OpenRouter Responses API error: ${errMsg}`);
+        }
+        const data = await res.json();
+        const choice = data.choices?.[0];
+        if (!choice || !choice.message) {
+           if (data.output) return typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
+           throw new Error(`OpenRouter Responses returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
         }
         return choice.message?.content || choice.text || "";
       }

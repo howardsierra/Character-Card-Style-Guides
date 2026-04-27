@@ -514,7 +514,10 @@ export default function App() {
       fetchProviderModels("openai");
       fetchProviderModels("openai-responses");
     }
-    if (apiKeys.openrouter !== prevKeys.openrouter) fetchProviderModels("openrouter");
+    if (apiKeys.openrouter !== prevKeys.openrouter) {
+      fetchProviderModels("openrouter");
+      fetchProviderModels("openrouter-responses");
+    }
     if (apiKeys.customEndpoint !== prevKeys.customEndpoint || apiKeys.customKey !== prevKeys.customKey) {
       fetchProviderModels("custom");
     }
@@ -526,7 +529,7 @@ export default function App() {
 
     // Initial fetch for all providers on mount
     if (prevKeys === apiKeys && prevProvider === provider) {
-      (["gemini", "anthropic", "openai", "openai-responses", "openrouter", "custom"] as AIProvider[]).forEach(p => {
+      (["gemini", "anthropic", "openai", "openai-responses", "openrouter", "openrouter-responses", "custom"] as AIProvider[]).forEach(p => {
         fetchProviderModels(p);
       });
       apiKeys.customEndpoints?.forEach(ep => {
@@ -4203,10 +4206,11 @@ export default function App() {
                     <div>
                       <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {(["gemini", "anthropic", "openrouter", "openai", "openai-responses", "custom"] as AIProvider[]).map((p) => {
+                        {(["gemini", "anthropic", "openrouter", "openrouter-responses", "openai", "openai-responses", "custom"] as AIProvider[]).map((p) => {
                           let label = p as string;
                           if (p === "openai-responses") label = "OpenAI (Responses)";
                           else if (p === "openrouter") label = "OpenRouter";
+                          else if (p === "openrouter-responses") label = "OpenRouter (Resp)";
                           return (
                           <div
                             key={p}
@@ -4336,7 +4340,7 @@ export default function App() {
                           />
                           {availableModels["openrouter"]?.length > 0 && (
                             <div className="mt-2">
-                              <Label htmlFor="openrouter-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <Label htmlFor="openrouter-model" className="text-slate-700 font-medium text-sm">Chat Completions Model</Label>
                               <select
                                 id="openrouter-model"
                                 value={apiModels["openrouter"] || ""}
@@ -4344,6 +4348,21 @@ export default function App() {
                                 className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
                               >
                                 {availableModels["openrouter"].map(m => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
+                          {availableModels["openrouter-responses"]?.length > 0 && (
+                            <div className="mt-2 py-1">
+                              <Label htmlFor="openrouter-responses-model" className="text-slate-700 font-medium text-sm">Responses API Model</Label>
+                              <select
+                                id="openrouter-responses-model"
+                                value={apiModels["openrouter-responses"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, "openrouter-responses": e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm shadow-sm"
+                              >
+                                {availableModels["openrouter-responses"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
                                 ))}
                               </select>
