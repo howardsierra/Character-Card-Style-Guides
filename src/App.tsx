@@ -130,6 +130,10 @@ export default function App() {
   const [isFetchingModels, setIsFetchingModels] = useState<Record<string, boolean>>({});
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [guidesLoaded, setGuidesLoaded] = useState(false);
+  const [customTemplatesLoaded, setCustomTemplatesLoaded] = useState(false);
+  const [savedCardsLoaded, setSavedCardsLoaded] = useState(false);
+  const [savedDraftsLoaded, setSavedDraftsLoaded] = useState(false);
   const [currentGuide, setCurrentGuide] = useState<string | null>(null);
   const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
   const [isEditingGuide, setIsEditingGuide] = useState(false);
@@ -306,6 +310,7 @@ export default function App() {
           }]);
         }
       }
+      setGuidesLoaded(true);
     });
 
     localforage.getItem("st_custom_templates").then((savedTemplatesData: any) => {
@@ -321,6 +326,7 @@ export default function App() {
           } catch (e) {}
         }
       }
+      setCustomTemplatesLoaded(true);
     });
 
     localforage.getItem("st_saved_cards").then((savedCardsData: any) => {
@@ -336,10 +342,12 @@ export default function App() {
           } catch (e) {}
         }
       }
+      setSavedCardsLoaded(true);
     });
 
     localforage.getItem("st_saved_drafts").then((savedDraftsData: any) => {
       if (savedDraftsData) setSavedDrafts(savedDraftsData);
+      setSavedDraftsLoaded(true);
     });
 
     localforage.getItem(APP_AUTOSAVE_KEY).then((savedAppState: any) => {
@@ -404,8 +412,10 @@ export default function App() {
   }, [provider]);
 
   useEffect(() => {
-    localforage.setItem("st_style_guides", guides).catch(e => console.error(e));
-  }, [guides]);
+    if (guidesLoaded) {
+      localforage.setItem("st_style_guides", guides).catch(e => console.error(e));
+    }
+  }, [guides, guidesLoaded]);
 
   // Save drafts
   useEffect(() => {
@@ -599,8 +609,9 @@ export default function App() {
         if (card && card.name) {
           newCards.push(card);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to parse file", e.target.files[i].name, err);
+        alert(`Failed to parse file ${e.target.files[i].name}:\n${err?.message || err}`);
       }
     }
     
@@ -1199,16 +1210,22 @@ export default function App() {
   };
 
   useEffect(() => {
-    localforage.setItem("st_custom_templates", customTemplates).catch(e => console.error(e));
-  }, [customTemplates]);
+    if (customTemplatesLoaded) {
+      localforage.setItem("st_custom_templates", customTemplates).catch(e => console.error(e));
+    }
+  }, [customTemplates, customTemplatesLoaded]);
 
   useEffect(() => {
-    localforage.setItem("st_saved_cards", savedCards).catch(e => console.error(e));
-  }, [savedCards]);
+    if (savedCardsLoaded) {
+      localforage.setItem("st_saved_cards", savedCards).catch(e => console.error(e));
+    }
+  }, [savedCards, savedCardsLoaded]);
 
   useEffect(() => {
-    localforage.setItem("st_saved_drafts", savedDrafts).catch(e => console.error(e));
-  }, [savedDrafts]);
+    if (savedDraftsLoaded) {
+      localforage.setItem("st_saved_drafts", savedDrafts).catch(e => console.error(e));
+    }
+  }, [savedDrafts, savedDraftsLoaded]);
 
   const lastExtractedRef = useRef<{ guide: string, template: string }>({ guide: "", template: "" });
 
@@ -1792,7 +1809,14 @@ export default function App() {
         guide.content,
         currentModel,
         templateExample,
-        slotVibes[index]
+        slotVibes[index],
+        (text) => {
+          setForgeSlots(prev => {
+            const newSlots = [...prev];
+            newSlots[index] = { ...newSlots[index], value: text };
+            return newSlots;
+          });
+        }
       );
       
       setForgeSlots(prev => {

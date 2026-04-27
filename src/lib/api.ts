@@ -294,9 +294,9 @@ async function callAIProvider(
 ): Promise<string> {
   try {
     let providerMaxTokens = maxTokens;
-    if (provider === "anthropic") providerMaxTokens = Math.min(maxTokens, 8192);
-    else if (provider === "openai") providerMaxTokens = Math.min(maxTokens, 16384);
-    else if (provider === "gemini") providerMaxTokens = Math.min(maxTokens, 8192);
+    if (provider === "anthropic" && maxTokens < 5000) providerMaxTokens = maxTokens;
+    else if (provider === "openai" && maxTokens < 5000) providerMaxTokens = maxTokens;
+    else if (provider === "gemini" && maxTokens < 5000) providerMaxTokens = maxTokens;
 
     const finalSystemPrompt = jsonMode 
       ? `${systemPrompt}\n\nIMPORTANT: You must respond ONLY with valid JSON. Do not include any conversational text, markdown formatting, or explanations outside the JSON object. Ensure all strings are properly escaped.`
@@ -628,6 +628,8 @@ Example Messages: ${c.mes_example}
   return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 16000, model);
 }
 
+import { callAIProviderStream } from "./stream";
+
 export async function generateSlotContent(
   provider: AIProvider,
   keys: ApiKeys,
@@ -640,7 +642,8 @@ export async function generateSlotContent(
   styleGuide: string,
   model?: string,
   templateExample?: string,
-  vibePrompt?: string
+  vibePrompt?: string,
+  onChunk?: (text: string) => void
 ): Promise<string> {
   const contextStr = otherSlots
     .filter(s => s.value.trim() !== "")
@@ -666,6 +669,19 @@ ${vibePrompt ? `\nSPECIFIC INSTRUCTIONS / VIBE FOR THIS FIELD:\n"${vibePrompt}"\
 ${templateExample ? `\nEXAMPLE OF FILLED TEMPLATE (Use this as a strict reference for formatting, tone, length, and level of detail for this field):\n${templateExample}` : ""}
 
 Keep the response concise, directly applicable to the field, and written in the tone dictated by the Style Guide. Do not include the field name in your response. Return ONLY the raw generated text.`;
+
+  if (onChunk) {
+    return callAIProviderStream(
+      provider,
+      keys,
+      prompt,
+      'You are an expert roleplay character creator.',
+      onChunk,
+      false,
+      8192,
+      model
+    );
+  }
 
   const responseText = await callAIProvider(
     provider,
@@ -1371,17 +1387,17 @@ Style Guidelines:\
 \
 Write ONLY the new greeting text. Do not include introductory text, labels, or extra quotes.';
 
-  const responseText = await callAIProvider(
+  const responseText = await callAIProviderStream(
     provider,
     keys,
     prompt,
     'You are an expert roleplay character creator and writer.',
+    onChunk,
     false,
-    2048,
+    131072,
     model
   );
 
-  onChunk(responseText);
   return responseText;
 }
 
