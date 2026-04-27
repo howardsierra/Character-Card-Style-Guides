@@ -477,9 +477,12 @@ export default function App() {
   // Fetch models when key or provider changes
   useEffect(() => {
     const fetchProviderModels = async (p: AIProvider) => {
-      const keyName = p === "openai-responses" ? "openai" : p;
+      let keyName = p;
+      if (p === "openai-responses") keyName = "openai";
+      else if (p === "openrouter-responses") keyName = "openrouter";
+      
       const key = p === "custom" ? apiKeys.customKey : apiKeys[keyName as keyof ApiKeys];
-      if (!key && p !== "gemini" && p !== "openai" && p !== "openai-responses" && p !== "anthropic" && p !== "openrouter") return;
+      if (!key && p !== "gemini" && p !== "openai" && p !== "openai-responses" && p !== "anthropic" && p !== "openrouter" && p !== "openrouter-responses") return;
       
       setIsFetchingModels(prev => ({ ...prev, [p]: true }));
       try {
