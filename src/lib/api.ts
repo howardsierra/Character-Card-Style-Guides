@@ -704,7 +704,8 @@ export async function generateCharacterCard(
   template?: string,
   model?: string,
   firstMessageIdea?: string,
-  templateExample?: string
+  templateExample?: string,
+  onChunk?: (text: string) => void
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
   
@@ -792,15 +793,29 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
     }
   };
 
-  const responseText = await callAIProvider(
-    provider,
-    keys,
-    prompt,
-    "You are an expert character creator. Output only valid JSON.",
-    true,
-    8192,
-    model
-  );
+  let responseText: string;
+  if (onChunk) {
+    responseText = await callAIProviderStream(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      onChunk,
+      true,
+      131072,
+      model
+    );
+  } else {
+    responseText = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      true,
+      131072,
+      model
+    );
+  }
   return parseResponse(responseText);
 }
 
@@ -1094,7 +1109,8 @@ export async function vibeForgeCard(
   slots: { name: string; description: string; value: string }[],
   model?: string,
   templateExample?: string,
-  styleGuide?: string
+  styleGuide?: string,
+  onChunk?: (text: string) => void
 ): Promise<{ name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> }> {
   const slotsPrompt = slots.map(s => `- ${s.name}: ${s.description}`).join("\n");
 
@@ -1125,15 +1141,29 @@ ${slotsPrompt}
     prompt += `\n\nFollow this template structure:\n${templateExample}`;
   }
 
-  const response = await callAIProvider(
-    provider,
-    keys,
-    prompt,
-    "You are an expert character creator. Output only valid JSON.",
-    true,
-    8192,
-    model
-  );
+  let response: string;
+  if (onChunk) {
+    response = await callAIProviderStream(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      onChunk,
+      true,
+      131072,
+      model
+    );
+  } else {
+    response = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      true,
+      131072,
+      model
+    );
+  }
   
   try {
     return parseJsonRobust(response);
@@ -1433,18 +1463,18 @@ You MUST return a valid JSON object matching this structure:
 Do not add any markdown blocks around the JSON.`;
 
   onChunk('Adapting card to style guide...');
-  const responseText = await callAIProvider(
+  const responseText = await callAIProviderStream(
     provider,
     keys,
     prompt,
     'You are an expert roleplay character creator and JSON formatter.',
+    onChunk,
     true, // jsonMode
-    8192,
+    131072,
     model
   );
 
   try {
-    const { parseJsonRobust } = await import('./parser');
     const parsed = parseJsonRobust(responseText);
     return {
       name: parsed.name || 'Adapted Character',
@@ -1452,6 +1482,7 @@ Do not add any markdown blocks around the JSON.`;
       personality: parsed.personality || '',
       scenario: parsed.scenario || '',
       first_mes: parsed.first_mes || '',
+      mes_example: parsed.mes_example || '',
       alternate_greetings: parsed.alternate_greetings || []
     };
   } catch (e) {
