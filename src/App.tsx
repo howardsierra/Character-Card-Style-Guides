@@ -245,7 +245,78 @@ export default function App() {
   const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>([]);
   const [hasHydratedAutosave, setHasHydratedAutosave] = useState(false);
 
+  const handleExportData = async () => {
+    const data = {
+      guides,
+      savedCards,
+      savedDrafts,
+      customTemplates,
+      apiKeys,
+      apiModels,
+      sectionConfigs,
+      provider,
+      appVersion: "1.0.0",
+      exportDate: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `styleforge_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.guides) setGuides(data.guides);
+        if (data.savedCards) setSavedCards(data.savedCards);
+        if (data.savedDrafts) setSavedDrafts(data.savedDrafts);
+        if (data.customTemplates) setCustomTemplates(data.customTemplates);
+        if (data.apiKeys) setApiKeys(data.apiKeys);
+        if (data.apiModels) setApiModels(data.apiModels);
+        if (data.sectionConfigs) setSectionConfigs(data.sectionConfigs);
+        if (data.provider) setProvider(data.provider);
+        alert("Data imported successfully. The page will reload to apply changes.");
+        window.location.reload();
+      } catch (err) {
+        console.error("Failed to import data", err);
+        alert("Failed to import data. Please ensure the file is a valid JSON backup.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const recoverLegacyData = () => {
+    const keys = ["st_style_guides", "st_saved_cards", "st_custom_templates", "st_saved_drafts", APP_AUTOSAVE_KEY];
+    let recoveredCount = 0;
+    
+    keys.forEach(key => {
+      const data = localStorage.getItem(key);
+      if (data) {
+        try {
+          const parsed = JSON.parse(data);
+          localforage.setItem(key, parsed);
+          recoveredCount++;
+        } catch (e) {}
+      }
+    });
+
+    if (recoveredCount > 0) {
+      alert(`Found and recovered ${recoveredCount} items from browser legacy storage. Please reload the page.`);
+      window.location.reload();
+    } else {
+      alert("No legacy data found in browser storage.");
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const guideRef = useRef<HTMLDivElement>(null);
 
   // Load saved data
@@ -290,39 +361,48 @@ export default function App() {
     });
 
     localforage.getItem("st_style_guides").then((savedGuidesData: any) => {
-      if (savedGuidesData) {
-        setGuides(savedGuidesData);
+      let finalGuides = null;
+      if (savedGuidesData && Array.isArray(savedGuidesData) && savedGuidesData.length > 0) {
+        finalGuides = savedGuidesData;
       } else {
         const oldData = localStorage.getItem("st_style_guides");
         if (oldData) {
           try {
             const parsed = JSON.parse(oldData);
-            setGuides(parsed);
-            localforage.setItem("st_style_guides", parsed);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              finalGuides = parsed;
+              localforage.setItem("st_style_guides", parsed);
+            }
           } catch (e) {}
-        } else {
-          setGuides([{
-            id: "default-elysiansuns",
-            title: "ElysianSuns Complete Style Guide v6.0",
-            content: DEFAULT_GUIDE_CONTENT,
-            date: new Date().toISOString(),
-            versions: []
-          }]);
         }
+      }
+
+      if (finalGuides) {
+        setGuides(finalGuides);
+      } else {
+        setGuides([{
+          id: "default-elysiansuns",
+          title: "ElysianSuns Complete Style Guide v6.0",
+          content: DEFAULT_GUIDE_CONTENT,
+          date: new Date().toISOString(),
+          versions: []
+        }]);
       }
       setGuidesLoaded(true);
     });
 
     localforage.getItem("st_custom_templates").then((savedTemplatesData: any) => {
-      if (savedTemplatesData) {
+      if (savedTemplatesData && Array.isArray(savedTemplatesData) && savedTemplatesData.length > 0) {
         setCustomTemplates(savedTemplatesData);
       } else {
         const oldData = localStorage.getItem("st_custom_templates");
         if (oldData) {
           try {
             const parsed = JSON.parse(oldData);
-            setCustomTemplates(parsed);
-            localforage.setItem("st_custom_templates", parsed);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setCustomTemplates(parsed);
+              localforage.setItem("st_custom_templates", parsed);
+            }
           } catch (e) {}
         }
       }
@@ -330,15 +410,17 @@ export default function App() {
     });
 
     localforage.getItem("st_saved_cards").then((savedCardsData: any) => {
-      if (savedCardsData) {
+      if (savedCardsData && Array.isArray(savedCardsData) && savedCardsData.length > 0) {
         setSavedCards(savedCardsData);
       } else {
         const oldData = localStorage.getItem("st_saved_cards");
         if (oldData) {
           try {
             const parsed = JSON.parse(oldData);
-            setSavedCards(parsed);
-            localforage.setItem("st_saved_cards", parsed);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setSavedCards(parsed);
+              localforage.setItem("st_saved_cards", parsed);
+            }
           } catch (e) {}
         }
       }
@@ -4313,7 +4395,66 @@ export default function App() {
                           )}
                         </div>
 
-                        <div className="space-y-2">
+                        <div className="space-y-4 pt-6 md:pt-8 border-t border-[#e5e4e2]">
+                          <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Storage Management</h3>
+                          <p className="text-sm text-slate-500 mb-4">
+                            All your data is currently stored in your browser's private storage (IndexedDB).
+                            If you switch devices, clear your browser cache, or notice missing data after a deployment, 
+                            use these tools to backup or recover your information.
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <Button 
+                              onClick={handleExportData}
+                              variant="outline"
+                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                            >
+                              <div className="flex flex-col items-start">
+                                <span className="flex items-center font-medium text-slate-900">
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Export All Data
+                                </span>
+                                <span className="text-xs text-slate-500 mt-1">Download backup as .json</span>
+                              </div>
+                            </Button>
+                            
+                            <Button 
+                              onClick={() => importInputRef.current?.click()}
+                              variant="outline"
+                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                            >
+                              <div className="flex flex-col items-start">
+                                <span className="flex items-center font-medium text-slate-900">
+                                  <Upload className="w-4 h-4 mr-2" />
+                                  Import Data
+                                </span>
+                                <span className="text-xs text-slate-500 mt-1">Restore from a .json backup</span>
+                              </div>
+                              <input 
+                                type="file" 
+                                ref={importInputRef} 
+                                onChange={handleImportData} 
+                                className="hidden" 
+                                accept="application/json"
+                              />
+                            </Button>
+
+                            <Button 
+                              onClick={recoverLegacyData}
+                              variant="outline"
+                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                            >
+                              <div className="flex flex-col items-start">
+                                <span className="flex items-center font-medium text-slate-900">
+                                  <RefreshCw className="w-4 h-4 mr-2" />
+                                  Check Legacy Storage
+                                </span>
+                                <span className="text-xs text-slate-500 mt-1">Recover data from localStorage</span>
+                              </div>
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 pt-6 md:pt-8 border-t border-[#e5e4e2]">
                           <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key (shared with Responses API)</Label>
                           <Input
                             id="openai"
