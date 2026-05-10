@@ -275,14 +275,45 @@ export default function App() {
     reader.onload = async (event) => {
       try {
         const data = JSON.parse(event.target?.result as string);
-        if (data.guides) setGuides(data.guides);
-        if (data.savedCards) setSavedCards(data.savedCards);
-        if (data.savedDrafts) setSavedDrafts(data.savedDrafts);
-        if (data.customTemplates) setCustomTemplates(data.customTemplates);
-        if (data.apiKeys) setApiKeys(data.apiKeys);
-        if (data.apiModels) setApiModels(data.apiModels);
-        if (data.sectionConfigs) setSectionConfigs(data.sectionConfigs);
-        if (data.provider) setProvider(data.provider);
+        
+        // Save to localforage / localStorage first
+        const promises = [];
+        
+        if (data.guides) {
+          setGuides(data.guides);
+          promises.push(localforage.setItem("st_style_guides", data.guides));
+        }
+        if (data.savedCards) {
+          setSavedCards(data.savedCards);
+          promises.push(localforage.setItem("st_saved_cards", data.savedCards));
+        }
+        if (data.savedDrafts) {
+          setSavedDrafts(data.savedDrafts);
+          promises.push(localforage.setItem("st_saved_drafts", data.savedDrafts));
+        }
+        if (data.customTemplates) {
+          setCustomTemplates(data.customTemplates);
+          promises.push(localforage.setItem("st_custom_templates", data.customTemplates));
+        }
+        if (data.apiKeys) {
+          setApiKeys(data.apiKeys);
+          localStorage.setItem("st_style_keys", JSON.stringify(data.apiKeys));
+        }
+        if (data.apiModels) {
+          setApiModels(data.apiModels);
+          localStorage.setItem("st_style_models", JSON.stringify(data.apiModels));
+        }
+        if (data.sectionConfigs) {
+          setSectionConfigs(data.sectionConfigs);
+          localStorage.setItem("st_section_configs", JSON.stringify(data.sectionConfigs));
+        }
+        if (data.provider) {
+          setProvider(data.provider);
+          localStorage.setItem("st_style_provider", data.provider);
+        }
+        
+        await Promise.all(promises);
+
         alert("Data imported successfully. The page will reload to apply changes.");
         window.location.reload();
       } catch (err) {

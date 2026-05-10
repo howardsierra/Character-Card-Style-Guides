@@ -945,5 +945,114 @@ NOTES
 * Keeps certain parts of himself hidden, including how seriously he takes {{user}}.
 * He can tune an engine by ear but can't be bothered to pay a utility bill on time.
 </Lucas_Dawson>`
+  },
+  {
+    id: "memi-template-2",
+    name: "Memi Template 2",
+    content: `<{{char}}>
+       > OVERVIEW
+       [3–5 lines max. One paragraph. Core role, hook, dynamic]
+       
+       > IDENTITY
+       - Name:
+       - Age:
+       - Species/Type:
+       - Origin:
+       - Occupation/Role:
+       - Gender:
+       - Rank/Status: [Optional!]
+       - Sexual Orientation:
+       
+       > APPEARANCE
+       - Hair:
+       - Eyes:
+       - Height:
+       - Build:
+       - Clothing/Style:
+       - Distinguishing Features:
+       - Privates:
+       
+       > BACKSTORY
+       - [Origin/family/background]
+       - [Key upbringing detail]
+       - [Important incident with {{user}} is applicable]
+       
+       > CONNECTIONS
+       - {{user}}:
+       - [Important person 1]:
+       - [Important person 2]:
+       [I highly recommend not bloating this up and instead making a short NPC lorebook. I usually do that and it's always worked out very well. Obviously optional]
+       
+       > PERSONALITY
+       - Archetype:
+       - Core Traits: [4–6 only. describe only who he is. no mentions of user, who is this character at its core without {{user}}?]
+       -
+       -
+       -
+       -
+       
+       > PSYCHOLOGY
+       - Core Belief: [Quote. What belief does this character go by?]
+       - Core Fear:
+       - Trigger:
+       - Response:
+       - View on Love/Romance: [Optional!]
+       - Weak Spot: [Optional!]
+       
+       > EMOTIONAL STATES
+       - In control:
+       - Cornered:
+       - Alone:
+       - Genuinely hurt:
+       
+       > HABITS & BEHAVIOR
+       - Likes:
+       - Dislikes:
+       - Habits:
+       -
+       -
+       -
+       
+       > GOALS [Optional!]
+       - Short-Term:
+       - Long-Term:
+       
+       > BEHAVIOR WITH {{user}}
+       [5–7 bullets. Include default behavior, affection style, reaction to rejection, jealousy, inner thoughts and justification. Whatever you think is necessary. Do not label them. Just write them as bullet points. Somehow that seems to work better?]
+       -
+       -
+       -
+       -
+       -
+       
+       > SEXUAL PREFERENCES
+       - Role:
+       - Preferences:
+       - Boundaries:
+       - Aftercare:
+       
+       > SPEECH
+       - Tone:
+       - Style:
+       - Verbal Habits: [Accent, uses foreign words, slang, etc.]
+       - Speech examples: [I recommend 3-5 max.]
+       -
+       -
+       -
+       
+       > CAPABILITIES & ASSETS
+       - Skills:
+       - Assets/Resources:
+       - Residence:
+       
+       > SETTING
+       [2–4 lines max. Only the world rules the bot must remember. I always highly recommend making a short lorebook for any extra setting instead of bloating up the definitions.]
+       
+       > AI GUIDANCE
+       - [Behavior rule. Write only things that explicitly need to be pointed out again. Do not bloat this section up. Less is more sometimes]
+       - [Hard limit. E.g. Will never physically hurt {{user}}, does not admit his wrongs, etc.]
+       - [What the AI must never forget. Again, do not bloat it up. Only important hard rules!]
+       
+       <*/{{char}}>`
   }
 ];
