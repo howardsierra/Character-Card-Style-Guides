@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw, Eye, EyeOff, ClipboardPaste } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -89,6 +89,61 @@ function NavButton({ view, icon: Icon, label, currentView, setView }: any) {
         {label}
       </span>
     </button>
+  );
+}
+
+function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: string, value: string, onChange: (e: any) => void, placeholder: string, disabled?: boolean }) {
+  const [show, setShow] = useState(false);
+  
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      onChange({ target: { value: text } });
+    } catch (err) {
+      console.error("Paste failed, trying prompt as fallback", err);
+      const text = window.prompt("Paste your API key here:");
+      if (text !== null) {
+        onChange({ target: { value: text } });
+      }
+    }
+  };
+
+  return (
+    <div className="relative flex items-center w-full">
+      <Input
+        id={id}
+        type={show ? "text" : "password"}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] pr-[4.5rem] text-base w-full"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck="false"
+      />
+      <div className="absolute right-1 flex items-center gap-1.5 h-full px-1">
+        {navigator.clipboard ? (
+          <button
+            type="button"
+            onClick={handlePaste}
+            className="text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors flex items-center justify-center p-1.5"
+            title="Paste from clipboard"
+          >
+            <ClipboardPaste className="w-4 h-4" />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setShow(!show)}
+          className="text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors flex items-center justify-center p-1.5"
+          title={show ? "Hide key" : "Show key"}
+        >
+          {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -4373,13 +4428,11 @@ export default function App() {
                       <div className="space-y-4 md:space-y-6">
                         <div className="space-y-2">
                           <Label htmlFor="gemini" className="text-slate-700 font-medium">Gemini API Key</Label>
-                          <Input
+                          <ApiKeyInput
                             id="gemini"
-                            type="password"
                             placeholder="AIzaSy..."
                             value={apiKeys.gemini}
                             onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           <p className="text-xs text-slate-500">Leave blank to use the default AI Studio key.</p>
                           {availableModels["gemini"]?.length > 0 && (
@@ -4401,13 +4454,11 @@ export default function App() {
                         
                         <div className="space-y-2">
                           <Label htmlFor="anthropic" className="text-slate-700 font-medium">Anthropic API Key</Label>
-                          <Input
+                          <ApiKeyInput
                             id="anthropic"
-                            type="password"
                             placeholder="sk-ant-..."
                             value={apiKeys.anthropic}
                             onChange={(e) => setApiKeys({ ...apiKeys, anthropic: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           {availableModels["anthropic"]?.length > 0 && (
                             <div className="mt-2">
@@ -4487,13 +4538,11 @@ export default function App() {
 
                         <div className="space-y-2 pt-6 md:pt-8 border-t border-[#e5e4e2]">
                           <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key (shared with Responses API)</Label>
-                          <Input
+                          <ApiKeyInput
                             id="openai"
-                            type="password"
                             placeholder="sk-proj-..."
                             value={apiKeys.openai}
                             onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           {availableModels["openai"]?.length > 0 && (
                             <div className="mt-2">
@@ -4529,13 +4578,11 @@ export default function App() {
 
                         <div className="space-y-2">
                           <Label htmlFor="openrouter" className="text-slate-700 font-medium">OpenRouter API Key</Label>
-                          <Input
+                          <ApiKeyInput
                             id="openrouter"
-                            type="password"
                             placeholder="sk-or-v1-..."
                             value={apiKeys.openrouter}
                             onChange={(e) => setApiKeys({ ...apiKeys, openrouter: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           {availableModels["openrouter"]?.length > 0 && (
                             <div className="mt-2">
@@ -4609,12 +4656,11 @@ export default function App() {
                             </div>
                             <div className="space-y-2">
                               <Label htmlFor="customKey" className="text-slate-700 font-medium text-xs">Custom API Key</Label>
-                              <Input
+                              <ApiKeyInput
                                 id="customKey"
-                                type="password"
+                                placeholder="sk-..."
                                 value={apiKeys.customKey}
                                 onChange={(e) => setApiKeys({ ...apiKeys, customKey: e.target.value })}
-                                className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
                               />
                             </div>
                             {availableModels["custom"]?.length > 0 && (
@@ -4680,16 +4726,15 @@ export default function App() {
                               </div>
                               <div className="space-y-2">
                                 <Label htmlFor={`ep-key-${ep.id}`} className="text-slate-700 font-medium text-xs">Custom API Key</Label>
-                                <Input
+                                <ApiKeyInput
                                   id={`ep-key-${ep.id}`}
-                                  type="password"
+                                  placeholder="sk-..."
                                   value={ep.key}
                                   onChange={(e) => {
                                     const newEndpoints = [...(apiKeys.customEndpoints || [])];
                                     newEndpoints[index] = { ...ep, key: e.target.value };
                                     setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
                                   }}
-                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
                                 />
                               </div>
                               {availableModels[ep.id]?.length > 0 && (
