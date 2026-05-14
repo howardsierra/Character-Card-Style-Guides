@@ -1,0 +1,84 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { return request.auth != null; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isValidId(id) { return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      // We don't write generic user docs right now, only subcollections
+      
+      match /style_guides/{docId} {
+        allow read, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(docId) 
+          && incoming().userId == userId
+          && incoming().name is string && incoming().name.size() <= 200
+          && incoming().content is string && incoming().content.size() <= 200000
+          && incoming().createdAt == request.time.toMillis()
+          && incoming().updatedAt == request.time.toMillis();
+        allow update: if isOwner(userId) && isValidId(docId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time.toMillis()
+          && incoming().diff(existing()).affectedKeys().hasAny(['name', 'content', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      match /saved_cards/{docId} {
+        allow read, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(docId)
+          && incoming().userId == userId
+          && incoming().createdAt == request.time.toMillis()
+          && incoming().updatedAt == request.time.toMillis();
+        allow update: if isOwner(userId) && isValidId(docId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time.toMillis();
+        allow delete: if isOwner(userId);
+      }
+
+      match /custom_templates/{docId} {
+        allow read, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(docId)
+          && incoming().userId == userId
+          && incoming().name is string && incoming().name.size() <= 200
+          && incoming().content is string && incoming().content.size() <= 200000
+          && incoming().createdAt == request.time.toMillis()
+          && incoming().updatedAt == request.time.toMillis();
+        allow update: if isOwner(userId) && isValidId(docId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time.toMillis()
+          && incoming().diff(existing()).affectedKeys().hasAny(['name', 'content', 'updatedAt']);
+        allow delete: if isOwner(userId);
+      }
+
+      match /character_drafts/{docId} {
+        allow read, list: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(docId)
+          && incoming().userId == userId
+          && incoming().createdAt == request.time.toMillis()
+          && incoming().updatedAt == request.time.toMillis();
+        allow update: if isOwner(userId) && isValidId(docId)
+          && incoming().userId == existing().userId
+          && incoming().createdAt == existing().createdAt
+          && incoming().updatedAt == request.time.toMillis();
+        allow delete: if isOwner(userId);
+      }
+
+      match /app_state/autosave {
+        allow read: if isOwner(userId);
+        allow write: if isOwner(userId)
+          && incoming().userId == userId
+          && incoming().updatedAt == request.time.toMillis();
+      }
+    }
+  }
+}

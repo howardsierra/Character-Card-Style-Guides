@@ -1,0 +1,93 @@
+{
+  "entities": {
+    "StyleGuide": {
+      "title": "StyleGuide",
+      "description": "User created style guide",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "id", "name", "content"]
+    },
+    "CharacterCard": {
+      "title": "CharacterCard",
+      "description": "User saved character card",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "id": { "type": "string" },
+        "data": { "type": "object" },
+        "avatar": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "id", "data"]
+    },
+    "CustomTemplate": {
+      "title": "CustomTemplate",
+      "description": "User created custom card template",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "id", "name", "content"]
+    },
+    "CharacterDraft": {
+      "title": "CharacterDraft",
+      "description": "User saved Character Forge draft",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "id": { "type": "string" },
+        "data": { "type": "object" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "id", "data"]
+    },
+    "AppState": {
+      "title": "AppState",
+      "description": "User application autosave state",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "data": { "type": "object" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["userId", "data"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/style_guides/{guideId}": {
+      "schema": { "$ref": "#/entities/StyleGuide" },
+      "description": "User's personal style guides"
+    },
+    "/users/{userId}/saved_cards/{cardId}": {
+      "schema": { "$ref": "#/entities/CharacterCard" },
+      "description": "User's saved character cards"
+    },
+    "/users/{userId}/custom_templates/{templateId}": {
+      "schema": { "$ref": "#/entities/CustomTemplate" },
+      "description": "User's custom format templates"
+    },
+    "/users/{userId}/character_drafts/{draftId}": {
+      "schema": { "$ref": "#/entities/CharacterDraft" },
+      "description": "User's Work in Progress character drafts"
+    },
+    "/users/{userId}/app_state/autosave": {
+      "schema": { "$ref": "#/entities/AppState" },
+      "description": "User's autosaved app state"
+    }
+  }
+}
