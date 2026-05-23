@@ -9,7 +9,7 @@ import { Checkbox } from "./components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import { cn } from "./lib/utils";
 import { CharacterCard, parseFile, parsePdfToText, parseDocxToText, parseFanficFile } from "./lib/parser";
-import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, generateStyleGuideFromFanfiction, FanficInput, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
+import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, generateStyleGuideFromFanfiction, FanficInput, suggestStyleCombination, StyleCombinationSuggestion, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
 import { DEFAULT_GUIDE_CONTENT } from "./lib/defaultGuide";
 import { CardTemplate, DEFAULT_TEMPLATES } from "./lib/templates";
 import ReactMarkdown from "react-markdown";
@@ -53,6 +53,30 @@ interface SavedGuide {
   content: string;
   date: string;
   versions?: GuideVersion[];
+  source?: "card" | "fanfic";
+}
+
+function GuideOptions({ guides }: { guides: SavedGuide[] }) {
+  const fanficGuides = guides.filter((g) => g.source === "fanfic");
+  const cardGuides = guides.filter((g) => g.source !== "fanfic");
+  return (
+    <>
+      {cardGuides.length > 0 && (
+        <optgroup label="Card Style Guides">
+          {cardGuides.map((g) => (
+            <option key={g.id} value={g.id}>{g.title}</option>
+          ))}
+        </optgroup>
+      )}
+      {fanficGuides.length > 0 && (
+        <optgroup label="Fanfiction Style Guides">
+          {fanficGuides.map((g) => (
+            <option key={g.id} value={g.id}>{g.title}</option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
 }
 
 interface SavedCard {
@@ -192,6 +216,9 @@ export default function App() {
   const [isParsing, setIsParsing] = useState(false);
   const [fanfics, setFanfics] = useState<Fanfic[]>([]);
   const [isParsingFanfic, setIsParsingFanfic] = useState(false);
+  const [currentGuideSource, setCurrentGuideSource] = useState<"card" | "fanfic" | null>(null);
+  const [combinationSuggestion, setCombinationSuggestion] = useState<StyleCombinationSuggestion | null>(null);
+  const [isSuggestingCombination, setIsSuggestingCombination] = useState(false);
   
   const [provider, setProvider] = useState<AIProvider>("gemini");
   const [apiKeys, setApiKeys] = useState<ApiKeys>({
@@ -563,6 +590,7 @@ export default function App() {
           if (Array.isArray(parsed.fanfics)) setFanfics(parsed.fanfics);
           if (typeof parsed.currentGuide === "string" || parsed.currentGuide === null) setCurrentGuide(parsed.currentGuide);
           if (typeof parsed.currentGuideId === "string" || parsed.currentGuideId === null) setCurrentGuideId(parsed.currentGuideId);
+          if (parsed.currentGuideSource === "card" || parsed.currentGuideSource === "fanfic" || parsed.currentGuideSource === null) setCurrentGuideSource(parsed.currentGuideSource);
           if (typeof parsed.isEditingGuide === "boolean") setIsEditingGuide(parsed.isEditingGuide);
           if (typeof parsed.editedGuideContent === "string") setEditedGuideContent(parsed.editedGuideContent);
           if (typeof parsed.showVersions === "boolean") setShowVersions(parsed.showVersions);
@@ -733,6 +761,7 @@ export default function App() {
       fanfics,
       currentGuide,
       currentGuideId,
+      currentGuideSource,
       isEditingGuide,
       editedGuideContent,
       showVersions,
@@ -765,6 +794,7 @@ export default function App() {
     fanfics,
     currentGuide,
     currentGuideId,
+    currentGuideSource,
     isEditingGuide,
     editedGuideContent,
     showVersions,
@@ -988,6 +1018,7 @@ export default function App() {
       const result = await generateStyleGuideFromFanfiction(currentProvider, apiKeys, fics, currentModel);
       setCurrentGuide(result);
       setCurrentGuideId(null);
+      setCurrentGuideSource("fanfic");
       setIsEditingGuide(false);
       setShowVersions(false);
     } catch (err) {
@@ -1251,6 +1282,7 @@ export default function App() {
       const result = await generateStyleGuide(currentProvider, apiKeys, cards, currentModel);
       setCurrentGuide(result);
       setCurrentGuideId(null);
+      setCurrentGuideSource("card");
       setIsEditingGuide(false);
       setShowVersions(false);
       setView("generate");
@@ -1273,6 +1305,7 @@ export default function App() {
       const result = await mergeStyleGuides(currentProvider, apiKeys, guidesToMerge, currentModel);
       setCurrentGuide(result);
       setCurrentGuideId(null);
+      setCurrentGuideSource("card");
       setIsEditingGuide(false);
       setShowVersions(false);
       setView("generate");
@@ -1282,6 +1315,33 @@ export default function App() {
       alert("Failed to merge guides. Check console for details.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleSuggestCombination = async () => {
+    const selected = guides.filter((g) => selectedGuides.has(g.id));
+    if (selected.length !== 2) return;
+    setIsSuggestingCombination(true);
+    setCombinationSuggestion(null);
+    try {
+      // Order so a fanfiction guide (if present) is presented first for clearer framing.
+      const ordered = [...selected].sort((a, b) =>
+        (a.source === "fanfic" ? 0 : 1) - (b.source === "fanfic" ? 0 : 1)
+      );
+      const { currentProvider, currentModel } = getProviderAndModel("library");
+      const result = await suggestStyleCombination(
+        currentProvider,
+        apiKeys,
+        { title: ordered[0].title, content: ordered[0].content, source: ordered[0].source },
+        { title: ordered[1].title, content: ordered[1].content, source: ordered[1].source },
+        currentModel
+      );
+      setCombinationSuggestion(result);
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to analyze combination: " + (err.message || err));
+    } finally {
+      setIsSuggestingCombination(false);
     }
   };
 
@@ -1296,7 +1356,8 @@ export default function App() {
       title: title,
       content: currentGuide,
       date: new Date().toISOString(),
-      versions: []
+      versions: [],
+      source: currentGuideSource || "card"
     };
     setGuides((prev) => [newGuide, ...prev]);
     setCurrentGuideId(newGuide.id);
@@ -1567,6 +1628,7 @@ export default function App() {
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
     setSelectedGuides(newSet);
+    setCombinationSuggestion(null);
   };
 
   const deleteGuide = (id: string) => {
@@ -1847,13 +1909,16 @@ export default function App() {
       const { generateAlternateGreeting } = await import("./lib/api");
       const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
       const existingGreetings = forgedCard.alternate_greetings || [];
+      const forgeGuide = guides.find(g => g.id === forgeSelectedGuide);
       const greeting = await generateAlternateGreeting(
         currentProvider,
         apiKeys,
         forgedCard,
         existingGreetings,
         currentModel,
-        (partial) => setForgeStreamText(partial)
+        (partial) => setForgeStreamText(partial),
+        undefined,
+        forgeGuide?.content
       );
       setForgedCard({
         ...forgedCard,
@@ -2911,8 +2976,18 @@ export default function App() {
                         <Upload className="w-4 h-4 mr-2" />
                         Import Guide
                       </Button>
-                      <Button 
-                        onClick={handleMerge} 
+                      <Button
+                        onClick={handleSuggestCombination}
+                        disabled={selectedGuides.size !== 2 || isSuggestingCombination}
+                        variant="outline"
+                        className="rounded-full border-[#8B3A3A]/30 text-[#8B3A3A] hover:bg-[#8B3A3A]/5 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                        title="Pick one fanfiction guide and one card guide to see if their styles can combine"
+                      >
+                        {isSuggestingCombination ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                        Suggest Combination
+                      </Button>
+                      <Button
+                        onClick={handleMerge}
                         disabled={selectedGuides.size < 2 || isGenerating}
                         className="rounded-full bg-slate-900 text-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                       >
@@ -2921,6 +2996,68 @@ export default function App() {
                       </Button>
                     </div>
                   </div>
+
+                  {(isSuggestingCombination || combinationSuggestion) && (
+                    <div className="bg-white border border-[#8B3A3A]/20 rounded-2xl p-5 md:p-7 shadow-sm">
+                      {isSuggestingCombination ? (
+                        <div className="flex items-center gap-3 text-slate-600">
+                          <Loader2 className="w-5 h-5 animate-spin text-[#8B3A3A]" />
+                          <span className="text-sm md:text-base">Analyzing whether these two styles can be combined...</span>
+                        </div>
+                      ) : combinationSuggestion ? (
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <Wand2 className="w-5 h-5 text-[#8B3A3A]" />
+                              <h3 className="text-lg md:text-xl font-serif font-medium text-slate-900">Combination Analysis</h3>
+                              <span className={cn(
+                                "text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full",
+                                combinationSuggestion.compatibility === "high" ? "bg-emerald-100 text-emerald-700" :
+                                combinationSuggestion.compatibility === "medium" ? "bg-amber-100 text-amber-700" :
+                                "bg-red-100 text-red-700"
+                              )}>
+                                {combinationSuggestion.compatibility} compatibility
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => setCombinationSuggestion(null)}
+                              className="w-7 h-7 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-colors flex-shrink-0"
+                              title="Dismiss"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <p className="text-slate-900 font-medium text-sm md:text-base">{combinationSuggestion.verdict}</p>
+                          {combinationSuggestion.rationale && (
+                            <p className="text-slate-600 text-sm leading-relaxed">{combinationSuggestion.rationale}</p>
+                          )}
+                          {combinationSuggestion.recommendations.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">How to combine</p>
+                              <ul className="space-y-1.5">
+                                {combinationSuggestion.recommendations.map((rec, i) => (
+                                  <li key={i} className="flex gap-2 text-sm text-slate-700">
+                                    <Check className="w-4 h-4 text-[#8B3A3A] flex-shrink-0 mt-0.5" />
+                                    <span>{rec}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          <div className="pt-2">
+                            <Button
+                              onClick={() => { setCombinationSuggestion(null); handleMerge(); }}
+                              disabled={selectedGuides.size !== 2 || isGenerating}
+                              className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white text-sm px-5"
+                            >
+                              {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Merge className="w-4 h-4 mr-2" />}
+                              Create Combined Guide
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
 
                   {guides.length === 0 ? (
                     <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
@@ -2952,7 +3089,16 @@ export default function App() {
                                 {selectedGuides.has(guide.id) && <Check className="w-3 h-3 text-white" />}
                               </div>
                               <div>
-                                <h3 className="font-serif font-medium text-xl text-slate-900">{guide.title}</h3>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h3 className="font-serif font-medium text-xl text-slate-900">{guide.title}</h3>
+                                  <span className={cn(
+                                    "inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full",
+                                    guide.source === "fanfic" ? "bg-[#8B3A3A]/10 text-[#8B3A3A]" : "bg-slate-100 text-slate-500"
+                                  )}>
+                                    {guide.source === "fanfic" && <Feather className="w-3 h-3" />}
+                                    {guide.source === "fanfic" ? "Fanfic" : "Card"}
+                                  </span>
+                                </div>
                                 <p className="text-xs text-slate-500 font-medium tracking-wide uppercase mt-1">
                                   {new Date(guide.date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
                                 </p>
@@ -2976,6 +3122,7 @@ export default function App() {
                                 e.stopPropagation();
                                 setCurrentGuide(guide.content);
                                 setCurrentGuideId(guide.id);
+                                setCurrentGuideSource(guide.source || "card");
                                 setIsEditingGuide(false);
                                 setShowVersions(false);
                                 setView("generate");
@@ -3281,9 +3428,7 @@ export default function App() {
                           className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
                         >
                           <option value="" disabled>Select a saved guide...</option>
-                          {guides.map((g) => (
-                            <option key={g.id} value={g.id}>{g.title}</option>
-                          ))}
+                          <GuideOptions guides={guides} />
                         </select>
                         {guides.length === 0 && (
                           <p className="text-xs text-amber-600 mt-1">You need to save a style guide in the Library first.</p>
@@ -3666,9 +3811,7 @@ export default function App() {
                               className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
                             >
                               <option value="">No style guide (use card's natural voice)</option>
-                              {guides.map((g) => (
-                                <option key={g.id} value={g.id}>{g.title}</option>
-                              ))}
+                              <GuideOptions guides={guides} />
                             </select>
                           </div>
 
@@ -3777,9 +3920,7 @@ export default function App() {
                               className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/50 focus-visible:border-cyan-600 transition-all"
                             >
                               <option value="" disabled>Pick a style guide...</option>
-                              {guides.map((g) => (
-                                <option key={g.id} value={g.id}>{g.title}</option>
-                              ))}
+                              <GuideOptions guides={guides} />
                             </select>
                             {guides.length === 0 && (
                               <p className="text-xs text-amber-600 mt-1">You need to save a style guide in the Library first.</p>
@@ -4549,9 +4690,7 @@ export default function App() {
                             className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
                           >
                             <option value="">No guide selected (Use cards only)</option>
-                            {guides.map((g) => (
-                              <option key={g.id} value={g.id}>{g.title}</option>
-                            ))}
+                            <GuideOptions guides={guides} />
                           </select>
                         </div>
                         <Button 

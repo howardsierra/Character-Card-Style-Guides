@@ -694,6 +694,66 @@ export async function generateStyleGuideFromFanfiction(
   return callAIProvider(provider, keys, prompt, FANFIC_SYSTEM_PROMPT, false, 16000, model);
 }
 
+export interface StyleCombinationSuggestion {
+  compatibility: "high" | "medium" | "low";
+  verdict: string;
+  rationale: string;
+  recommendations: string[];
+}
+
+export async function suggestStyleCombination(
+  provider: AIProvider,
+  keys: ApiKeys,
+  guideA: { title: string; content: string; source?: string },
+  guideB: { title: string; content: string; source?: string },
+  model?: string
+): Promise<StyleCombinationSuggestion> {
+  const describe = (g: { title: string; content: string; source?: string }) =>
+    `${g.source === "fanfic" ? "Fanfiction-derived style guide" : "Character-card style guide"} titled "${g.title}":\n${g.content}`;
+
+  const prompt = `You are an expert literary analyst. Two writing style guides are provided below. One may be distilled from an author's fanfiction prose; the other may be derived from a creator's character cards. Your job is to judge whether these two styles can be productively COMBINED into a single coherent voice for writing roleplay character cards — especially their descriptions, first messages, and alternate greetings.
+
+Assess where the two voices reinforce each other and where they clash (e.g., conflicting tense/POV conventions, incompatible formatting rules, tonal mismatches). Be specific and base your judgment on the actual content of both guides.
+
+Return ONLY a valid JSON object with this exact shape (no markdown, no extra text):
+{
+  "compatibility": "high" | "medium" | "low",
+  "verdict": "A single concise sentence stating whether and how well they can be combined.",
+  "rationale": "2-4 sentences explaining the reasoning, citing concrete points of harmony and tension.",
+  "recommendations": ["Actionable tip on how to combine them", "What to take from the fanfiction voice", "What to keep from the card guide", "Any conflict to resolve"]
+}
+
+--- STYLE GUIDE A ---
+${describe(guideA)}
+
+--- STYLE GUIDE B ---
+${describe(guideB)}`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert literary analyst. Output only valid JSON.",
+    true,
+    4096,
+    model
+  );
+
+  try {
+    const parsed = parseJsonRobust(responseText);
+    const compatibility = ["high", "medium", "low"].includes(parsed.compatibility) ? parsed.compatibility : "medium";
+    return {
+      compatibility,
+      verdict: parsed.verdict || "These guides can be combined with some care.",
+      rationale: parsed.rationale || "",
+      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.filter((r: any) => typeof r === "string") : [],
+    };
+  } catch (e: any) {
+    console.error("Failed to parse combination suggestion JSON:", responseText);
+    throw new Error(`Failed to analyze style combination: ${e.message}`);
+  }
+}
+
 import { callAIProviderStream } from "./stream";
 
 export async function generateSlotContent(
