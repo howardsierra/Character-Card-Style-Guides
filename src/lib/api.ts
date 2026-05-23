@@ -628,6 +628,72 @@ Example Messages: ${c.mes_example}
   return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 16000, model);
 }
 
+const FANFIC_SYSTEM_PROMPT = `You are an expert literary analyst specializing in authorial voice. Your task is to read one or two pieces of fanfiction (prose) by a single author and reverse-engineer a comprehensive writing style guide that captures their unique authorial voice, prose techniques, and narrative DNA.
+
+You will often have only ONE or TWO works to analyze. This is intentional and sufficient — a skilled analyst can extract a rich, faithful voice profile from a small sample. Read closely. Infer the author's habits, instincts, and signature moves from concrete textual evidence rather than generic observations. Quote short, representative snippets from the prose to ground your observations.
+
+The output MUST be a polished Markdown document with the following sections:
+
+1. Authorial Voice Overview (A 2-3 paragraph portrait of how this author writes and what makes their voice recognizable)
+2. Prose Voice & Signature Techniques (Metaphor style, imagery, rhythm, recurring stylistic devices — with short quoted examples)
+3. Sentence Rhythm & Syntax (Sentence-length variation, fragments, run-ons, paragraph shape)
+4. Dialogue Voice & Speech Patterns (How characters speak, dialogue tags, subtext, banter, interruptions, dialect)
+5. Internal Monologue & POV Techniques (Narrative distance, tense, person, how thoughts and feelings are rendered)
+6. Pacing & Scene Construction (How scenes open and close, beats, transitions, how tension is built and released)
+7. Sensory & Descriptive Language (Which senses dominate, density of description, how settings and bodies are evoked)
+8. Emotional Register & Tonal Range (How emotion, intimacy, conflict, humor, and vulnerability are expressed)
+9. Thematic DNA & Recurring Motifs (Themes, obsessions, dynamics, and imagery the author returns to)
+10. Vocabulary & Diction (Signature words, phrases, verbal tics, register, profanity usage, distinctive word choices)
+11. Formatting & Punctuation Habits (Use of italics, em-dashes, ellipses, paragraph breaks, section breaks)
+12. Applying This Voice to Character Cards (Concrete guidance on how to write character descriptions, first messages, and dialogue so they sound like this author)
+13. Quick-Reference Checklist (A bulleted cheat-sheet a writer can follow to imitate this voice)
+
+Base every observation on evidence from the provided text. Do not invent biographical facts about the author. Output ONLY the Markdown document. Make it look professional and attractive.`;
+
+export interface FanficInput {
+  title: string;
+  author: string;
+  text: string;
+}
+
+const MAX_CHARS_PER_FIC = 60000;
+const MAX_TOTAL_CHARS = 140000;
+
+export async function generateStyleGuideFromFanfiction(
+  provider: AIProvider,
+  keys: ApiKeys,
+  fics: FanficInput[],
+  model?: string
+): Promise<string> {
+  let remainingBudget = MAX_TOTAL_CHARS;
+  const ficsData = fics.map((f, i) => {
+    const cap = Math.max(0, Math.min(MAX_CHARS_PER_FIC, remainingBudget));
+    let body = (f.text || "").trim();
+    let truncated = false;
+    if (body.length > cap) {
+      body = body.slice(0, cap);
+      truncated = true;
+    }
+    remainingBudget -= body.length;
+    const header = `--- Work ${i + 1}: "${f.title || "Untitled"}"${f.author ? ` by ${f.author}` : ""} ---`;
+    return `${header}\n${body}${truncated ? "\n\n[...excerpt truncated for length...]" : ""}`;
+  }).join("\n\n");
+
+  const authors = Array.from(new Set(fics.map(f => f.author.trim()).filter(Boolean)));
+  let authorLine: string;
+  if (authors.length === 1) {
+    authorLine = `All works below are by the same author: ${authors[0]}.`;
+  } else if (authors.length > 1) {
+    authorLine = `The works below are credited to multiple authors (${authors.join(", ")}). Build one combined voice profile, focusing on the shared, dominant authorial voice.`;
+  } else {
+    authorLine = `The works below are by a single author.`;
+  }
+
+  const prompt = `${authorLine} Analyze the following fanfiction prose and produce the comprehensive authorial style guide described in your instructions.\n\n${ficsData}\n\nGenerate the style guide now.`;
+
+  return callAIProvider(provider, keys, prompt, FANFIC_SYSTEM_PROMPT, false, 16000, model);
+}
+
 import { callAIProviderStream } from "./stream";
 
 export async function generateSlotContent(

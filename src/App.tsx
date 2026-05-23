@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw, Eye, EyeOff, ClipboardPaste, LogIn, LogOut } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw, Eye, EyeOff, ClipboardPaste, LogIn, LogOut, Feather } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -8,8 +8,8 @@ import { ScrollArea } from "./components/ui/scroll-area";
 import { Checkbox } from "./components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import { cn } from "./lib/utils";
-import { CharacterCard, parseFile, parsePdfToText, parseDocxToText } from "./lib/parser";
-import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
+import { CharacterCard, parseFile, parsePdfToText, parseDocxToText, parseFanficFile } from "./lib/parser";
+import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, generateStyleGuideFromFanfiction, FanficInput, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
 import { DEFAULT_GUIDE_CONTENT } from "./lib/defaultGuide";
 import { CardTemplate, DEFAULT_TEMPLATES } from "./lib/templates";
 import ReactMarkdown from "react-markdown";
@@ -31,7 +31,14 @@ function ConfiguredModelSelector(props: Omit<React.ComponentProps<typeof ModelSe
   return <ModelSelector {...props} customEndpoints={props.apiKeys.customEndpoints} />;
 }
 
-type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "script" | "image" | "settings";
+type ViewState = "upload" | "fanfiction" | "generate" | "saved" | "create" | "universe" | "script" | "image" | "settings";
+
+interface Fanfic {
+  id: string;
+  title: string;
+  author: string;
+  text: string;
+}
 const APP_AUTOSAVE_KEY = "st_app_autosave_v1";
 
 interface GuideVersion {
@@ -183,6 +190,8 @@ export default function App() {
   const [view, setView] = useState<ViewState>("upload");
   const [cards, setCards] = useState<CharacterCard[]>([]);
   const [isParsing, setIsParsing] = useState(false);
+  const [fanfics, setFanfics] = useState<Fanfic[]>([]);
+  const [isParsingFanfic, setIsParsingFanfic] = useState(false);
   
   const [provider, setProvider] = useState<AIProvider>("gemini");
   const [apiKeys, setApiKeys] = useState<ApiKeys>({
@@ -418,6 +427,7 @@ export default function App() {
     }
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fanficInputRef = useRef<HTMLInputElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const guideRef = useRef<HTMLDivElement>(null);
 
@@ -550,6 +560,7 @@ export default function App() {
         try {
           if (parsed.view) setView(parsed.view);
           if (Array.isArray(parsed.cards)) setCards(parsed.cards);
+          if (Array.isArray(parsed.fanfics)) setFanfics(parsed.fanfics);
           if (typeof parsed.currentGuide === "string" || parsed.currentGuide === null) setCurrentGuide(parsed.currentGuide);
           if (typeof parsed.currentGuideId === "string" || parsed.currentGuideId === null) setCurrentGuideId(parsed.currentGuideId);
           if (typeof parsed.isEditingGuide === "boolean") setIsEditingGuide(parsed.isEditingGuide);
@@ -719,6 +730,7 @@ export default function App() {
     const appState = {
       view,
       cards,
+      fanfics,
       currentGuide,
       currentGuideId,
       isEditingGuide,
@@ -750,6 +762,7 @@ export default function App() {
     hasHydratedAutosave,
     view,
     cards,
+    fanfics,
     currentGuide,
     currentGuideId,
     isEditingGuide,
@@ -922,6 +935,67 @@ export default function App() {
     
     setIsParsing(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleFanficUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length) return;
+    setIsParsingFanfic(true);
+
+    const newFics: Fanfic[] = [];
+    for (let i = 0; i < e.target.files.length; i++) {
+      const file = e.target.files[i];
+      try {
+        const { title, text } = await parseFanficFile(file);
+        if (!text || text.trim().length < 50) {
+          alert(`"${file.name}" produced little or no readable text. If it is a scanned PDF, try a text-based PDF or DOCX/TXT instead.`);
+          continue;
+        }
+        newFics.push({
+          id: Date.now().toString() + "_" + i,
+          title,
+          author: "",
+          text: text.trim(),
+        });
+      } catch (err: any) {
+        console.error("Failed to parse fanfic", file.name, err);
+        alert(`Failed to parse ${file.name}:\n${err?.message || err}`);
+      }
+    }
+
+    if (newFics.length > 0) {
+      setFanfics((prev) => [...prev, ...newFics]);
+    }
+
+    setIsParsingFanfic(false);
+    if (fanficInputRef.current) fanficInputRef.current.value = "";
+  };
+
+  const removeFanfic = (id: string) => {
+    setFanfics((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const updateFanfic = (id: string, field: "title" | "author", value: string) => {
+    setFanfics((prev) => prev.map((f) => (f.id === id ? { ...f, [field]: value } : f)));
+  };
+
+  const handleGenerateFromFanfiction = async () => {
+    if (fanfics.length === 0) return;
+    setIsGenerating(true);
+    setView("generate");
+    try {
+      const { currentProvider, currentModel } = getProviderAndModel("fanfiction");
+      const fics: FanficInput[] = fanfics.map((f) => ({ title: f.title, author: f.author, text: f.text }));
+      const result = await generateStyleGuideFromFanfiction(currentProvider, apiKeys, fics, currentModel);
+      setCurrentGuide(result);
+      setCurrentGuideId(null);
+      setIsEditingGuide(false);
+      setShowVersions(false);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate guide from fanfiction. Check console for details.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const removeCard = (index: number) => {
@@ -2338,6 +2412,15 @@ export default function App() {
         ref={fileInputRef}
         onChange={handleFileUpload}
       />
+      {/* Always-mounted file input for Fanfiction Distillery (PDF/DOCX/TXT) */}
+      <input
+        type="file"
+        multiple
+        accept=".pdf,.docx,.txt"
+        className="hidden"
+        ref={fanficInputRef}
+        onChange={handleFanficUpload}
+      />
       {/* Sidebar for Desktop / Topbar for Mobile */}
       <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2]/80 flex flex-col z-20 shrink-0 shadow-sm md:shadow-none">
         <div className="p-3 md:p-8 flex justify-between items-center md:block">
@@ -2375,6 +2458,7 @@ export default function App() {
         {/* Desktop Nav */}
         <nav className="hidden md:flex flex-col flex-1 px-4 space-y-1 overflow-y-auto">
           <NavButton view="upload" icon={Upload} label="Ingestion" currentView={view} setView={setView} />
+          <NavButton view="fanfiction" icon={Feather} label="Fanfiction" currentView={view} setView={setView} />
           <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
           <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
@@ -2529,6 +2613,125 @@ export default function App() {
                 </motion.div>
               )}
 
+              {/* FANFICTION VIEW */}
+              {view === "fanfiction" && (
+                <motion.div
+                  key="fanfiction"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6 md:space-y-8"
+                >
+                  <div className="space-y-2">
+                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Fanfiction Distillery</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light">
+                      Upload an author's fanfiction and distill their prose into a writing style guide. Just one or two works per author is enough to capture a faithful voice profile.
+                    </p>
+                  </div>
+
+                  <div
+                    className="border-dashed border-[1.5px] border-[#d1d0ce] bg-white/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:border-[#8B3A3A]/30 cursor-pointer"
+                    onClick={() => fanficInputRef.current?.click()}
+                  >
+                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+                      <Feather className="w-5 h-5 md:w-6 md:h-6 text-[#8B3A3A]" />
+                    </div>
+                    <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Upload Fanfiction</h3>
+                    <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
+                      Drag and drop PDF, DOCX, or TXT files here, or click to browse. One or two fics per author is plenty.
+                    </p>
+                    <Button
+                      className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105"
+                      disabled={isParsingFanfic}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fanficInputRef.current?.click();
+                      }}
+                    >
+                      {isParsingFanfic ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Plus className="w-5 h-5 mr-2" />}
+                      Browse Files
+                    </Button>
+                  </div>
+
+                  {fanfics.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-6"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-[#e5e4e2] pb-4 gap-4">
+                        <div>
+                          <h3 className="text-2xl font-serif font-medium">Loaded Works</h3>
+                          <p className="text-sm text-slate-500 mt-1">{fanfics.length} {fanfics.length === 1 ? "work" : "works"} loaded</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <ConfiguredModelSelector apiKeys={apiKeys}
+                            sectionId="fanfiction"
+                            globalProvider={provider}
+                            globalModels={apiModels}
+                            sectionConfigs={sectionConfigs}
+                            setSectionConfigs={setSectionConfigs}
+                            availableModels={availableModels}
+                            isFetchingModels={isFetchingModels}
+                          />
+                          <Button
+                            onClick={handleGenerateFromFanfiction}
+                            disabled={isGenerating || fanfics.length === 0}
+                            className="bg-slate-900 hover:bg-slate-800 text-white rounded-full px-6"
+                          >
+                            {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Feather className="w-4 h-4 mr-2" />}
+                            Distill Style Guide
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {fanfics.map((fic) => (
+                          <div key={fic.id} className="group relative bg-white border border-[#e5e4e2] rounded-2xl p-5 shadow-sm hover:shadow-md transition-all">
+                            <button
+                              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
+                              onClick={(e) => { e.stopPropagation(); removeFanfic(fic.id); }}
+                              title="Remove Work"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <div className="flex items-start gap-3 pr-8">
+                              <div className="w-10 h-10 rounded-xl bg-[#f0efe9] flex items-center justify-center flex-shrink-0">
+                                <Feather className="w-5 h-5 text-[#8B3A3A]" />
+                              </div>
+                              <div className="flex-1 min-w-0 space-y-2">
+                                <div>
+                                  <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Title</label>
+                                  <Input
+                                    value={fic.title}
+                                    onChange={(e) => updateFanfic(fic.id, "title", e.target.value)}
+                                    placeholder="Untitled"
+                                    className="h-8 text-sm border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Author</label>
+                                  <Input
+                                    value={fic.author}
+                                    onChange={(e) => updateFanfic(fic.id, "author", e.target.value)}
+                                    placeholder="Author name (optional)"
+                                    className="h-8 text-sm border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                                  />
+                                </div>
+                                <p className="text-xs text-slate-400 pt-1">
+                                  {fic.text.length.toLocaleString()} characters · ~{Math.max(1, Math.round(fic.text.length / 5 / 250)).toLocaleString()} pages
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </motion.div>
+              )}
+
               {/* GENERATE VIEW */}
               {view === "generate" && (
                 <motion.div
@@ -2633,7 +2836,9 @@ export default function App() {
                       <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
                       <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Synthesizing Authorial Voice...</h3>
                       <p className="text-slate-500 mt-2 max-w-md text-sm md:text-base">
-                        Analyzing prose patterns, dialogue registers, and thematic DNA across {cards.length} cards.
+                        {cards.length > 0
+                          ? `Analyzing prose patterns, dialogue registers, and thematic DNA across ${cards.length} cards.`
+                          : `Analyzing prose patterns, dialogue registers, and thematic DNA across ${fanfics.length} ${fanfics.length === 1 ? "work" : "works"} of fanfiction.`}
                       </p>
                     </div>
                   ) : currentGuide ? (
@@ -5049,6 +5254,7 @@ export default function App() {
       <div className="md:hidden flex-none border-t border-[#e5e4e2] bg-[#f9f8f6]/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)] z-30 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
         <nav className="flex overflow-x-auto px-4 py-2 space-x-1.5 no-scrollbar snap-x snap-mandatory">
           <NavButton view="upload" icon={Upload} label="Ingestion" currentView={view} setView={setView} />
+          <NavButton view="fanfiction" icon={Feather} label="Fanfiction" currentView={view} setView={setView} />
           <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
           <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
