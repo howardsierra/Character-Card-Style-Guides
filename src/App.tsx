@@ -770,6 +770,7 @@ export default function App() {
     localforage.setItem(APP_AUTOSAVE_KEY, appState).catch(e => console.error(e));
     if (user) {
       setDoc(doc(db, "users", user.uid, "app_state", "autosave"), { ...appState, userId: user.uid, updatedAt: Date.now() }).catch(err => {
+        // We log it but do not throw to avoid spamming the console on every typed character
         console.warn("Autosave Firebase sync error", err);
       });
     }
@@ -2410,6 +2411,7 @@ export default function App() {
           <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
           <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
+
           <NavButton view="universe" icon={Network} label="Universe" currentView={view} setView={setView} />
           <NavButton view="script" icon={FileJson} label="Script" currentView={view} setView={setView} />
           <NavButton view="settings" icon={Settings} label="Settings" currentView={view} setView={setView} />
@@ -4237,6 +4239,8 @@ export default function App() {
                 </motion.div>
               )}
 
+
+
               {/* UNIVERSE MAP VIEW */}
               {view === "universe" && (
                 <motion.div
@@ -4996,6 +5000,7 @@ export default function App() {
           <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
           <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
+
           <NavButton view="universe" icon={Network} label="Universe" currentView={view} setView={setView} />
           <NavButton view="script" icon={FileJson} label="Script" currentView={view} setView={setView} />
           <NavButton view="settings" icon={Settings} label="Settings" currentView={view} setView={setView} />
