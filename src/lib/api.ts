@@ -319,13 +319,26 @@ async function callAIProvider(
         return choice.message?.content || choice.text || "";
       }
       case "custom": {
-        const body: any = {
-          model: model || "default",
-          max_completion_tokens: maxTokens,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: prompt }
-          ],
+        const capabilityKey = `${keys.customEndpoint}::${model || "default"}`;
+        const cachedSupport = customMaxCompletionSupport.get(capabilityKey);
+
+        const createBody = (includeMaxCompletionTokens: boolean) => {
+          const b: any = {
+            model: model || "default",
+            messages: [
+              { role: "system", content: systemPrompt },
+              { role: "user", content: prompt }
+            ],
+          };
+          if (includeMaxCompletionTokens) {
+            b.max_completion_tokens = maxTokens;
+          } else {
+            b.max_tokens = maxTokens;
+          }
+          if (jsonMode) {
+            b.response_format = { type: "json_object" };
+          }
+          return b;
         };
 
         const sendRequest = async (includeMaxCompletionTokens: boolean) => {
