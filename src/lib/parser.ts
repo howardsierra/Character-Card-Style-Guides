@@ -1,7 +1,9 @@
 import * as pdfjsLib from 'pdfjs-dist';
+// @ts-ignore
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import mammoth from 'mammoth';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.mjs`;
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 export interface CharacterCard {
   name: string;
@@ -28,7 +30,7 @@ export async function parseDocxToText(file: File): Promise<string> {
 
 export async function parsePdfToText(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
   let fullText = '';
 
   for (let i = 1; i <= pdf.numPages; i++) {
@@ -39,6 +41,26 @@ export async function parsePdfToText(file: File): Promise<string> {
   }
 
   return fullText.trim();
+}
+
+export async function parseFanficFile(file: File): Promise<{ title: string; text: string }> {
+  const title = file.name.replace(/\.(pdf|docx|txt)$/i, "").trim() || file.name;
+  let text = "";
+
+  if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+    text = await parsePdfToText(file);
+  } else if (
+    file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+    file.name.endsWith(".docx")
+  ) {
+    text = await parseDocxToText(file);
+  } else if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+    text = (await file.text()).trim();
+  } else {
+    throw new Error("Unsupported fanfiction file type. Upload a PDF, DOCX, or TXT file.");
+  }
+
+  return { title, text };
 }
 
 export async function parseSillyTavernPng(file: File): Promise<CharacterCard> {

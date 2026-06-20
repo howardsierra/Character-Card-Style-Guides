@@ -1,7 +1,15 @@
 import { GoogleGenAI } from "@google/genai";
+import { jsonrepair } from "jsonrepair";
 import { CharacterCard } from "./parser";
 
-export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "custom";
+export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "openai-responses" | "custom" | string;
+
+export interface CustomEndpoint {
+  id: string;
+  name: string;
+  url: string;
+  key: string;
+}
 
 export interface ApiKeys {
   gemini: string;
@@ -10,6 +18,7 @@ export interface ApiKeys {
   openai: string;
   customEndpoint: string;
   customKey: string;
+  customEndpoints?: CustomEndpoint[];
 }
 
 export interface AIModel {
@@ -18,6 +27,44 @@ export interface AIModel {
 }
 
 const customMaxCompletionSupport = new Map<string, boolean>();
+
+export function parseJsonRobust(text: string): any {
+  const cleanText = text.trim();
+  try { return JSON.parse(cleanText); } catch (e) {}
+  try { return JSON.parse(jsonrepair(cleanText)); } catch (e) {}
+  
+  let extracted = cleanText;
+  const match = cleanText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (match) {
+    extracted = match[1].trim();
+    try { return JSON.parse(extracted); } catch (e) {}
+    try { return JSON.parse(jsonrepair(extracted)); } catch (e) {}
+  }
+  
+  const firstBrace = cleanText.indexOf('{');
+  const firstBracket = cleanText.indexOf('[');
+  let startIdx = -1;
+  if (firstBrace !== -1 && firstBracket !== -1) startIdx = Math.min(firstBrace, firstBracket);
+  else if (firstBrace !== -1) startIdx = firstBrace;
+  else if (firstBracket !== -1) startIdx = firstBracket;
+  
+  if (startIdx !== -1) {
+    const fromStart = cleanText.substring(startIdx);
+    try { return JSON.parse(jsonrepair(fromStart)); } catch (e) {}
+    
+    const isObj = cleanText[startIdx] === '{';
+    const lastChar = isObj ? cleanText.lastIndexOf('}') : cleanText.lastIndexOf(']');
+    if (lastChar > startIdx) {
+      const bounded = cleanText.substring(startIdx, lastChar + 1);
+      try { return JSON.parse(jsonrepair(bounded)); } catch (e) {}
+    }
+  }
+  
+  if (startIdx !== -1) {
+    return JSON.parse(jsonrepair(cleanText.substring(startIdx)));
+  }
+  return JSON.parse(jsonrepair(cleanText));
+}
 
 function isUnsupportedMaxCompletionError(errMsg: string): boolean {
   const normalized = errMsg.toLowerCase();
@@ -70,7 +117,8 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
           return defaultModels;
         }
       }
-      case "openai": {
+      case "openai":
+      case "openai-responses": {
         const defaultModels = [
           { id: "gpt-4o", name: "GPT-4o" },
           { id: "gpt-4o-mini", name: "GPT-4o Mini" },
@@ -94,13 +142,20 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
           return defaultModels;
         }
       }
-      case "openrouter": {
+      case "openrouter":
+      case "openrouter-responses": {
         try {
-          const res = await fetch("https://openrouter.ai/api/v1/models");
+          const headers: Record<string, string> = {};
+          if (keys.openrouter) headers["Authorization"] = `Bearer ${keys.openrouter}`;
+          const res = await fetch("https://openrouter.ai/api/v1/models", { headers });
           if (!res.ok) throw new Error("Failed to fetch OpenRouter models");
           const data = await res.json();
+          if (!data || !data.data || !Array.isArray(data.data)) {
+            console.warn(`Unexpected OpenRouter models response:`, data);
+            return [];
+          }
           return data.data
-            .map((m: any) => ({ id: m.id, name: m.name }))
+            .map((m: any) => ({ id: m.id, name: m.name || m.id }))
             .sort((a: any, b: any) => a.name.localeCompare(b.name));
         } catch (e) {
           console.warn("Could not fetch OpenRouter models", e);
@@ -135,16 +190,44 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
       }
       case "custom": {
         if (!keys.customEndpoint || !keys.customKey) return [];
-        const baseUrl = keys.customEndpoint.replace(/\/chat\/completions\/?$/, "");
-        const res = await fetch(`${baseUrl}/models`, {
-          headers: { "Authorization": `Bearer ${keys.customKey}` }
-        });
-        if (!res.ok) throw new Error("Failed to fetch Custom models");
-        const data = await res.json();
-        return data.data.map((m: any) => ({ id: m.id, name: m.id }));
+        try {
+          const baseUrl = keys.customEndpoint.replace(/\/chat\/completions\/?$/, "");
+          const res = await fetch(`${baseUrl}/models`, {
+            headers: { "Authorization": `Bearer ${keys.customKey}` }
+          });
+          if (!res.ok) throw new Error("Failed to fetch Custom models");
+          const data = await res.json();
+          if (data && data.data && Array.isArray(data.data)) {
+            return data.data.map((m: any) => ({ id: m.id, name: m.id }));
+          }
+          throw new Error("Invalid format");
+        } catch (e) {
+          console.warn("Could not fetch custom models, using default", e);
+          return [{ id: "default", name: "Default Custom Model" }];
+        }
       }
-      default:
+      default: {
+        if (provider.startsWith("custom-") && keys.customEndpoints) {
+          const ep = keys.customEndpoints.find(e => e.id === provider);
+          if (!ep || !ep.url || !ep.key) return [];
+          try {
+            const baseUrl = ep.url.replace(/\/chat\/completions\/?$/, "");
+            const res = await fetch(`${baseUrl}/models`, {
+              headers: { "Authorization": `Bearer ${ep.key}` }
+            });
+            if (!res.ok) throw new Error("Failed to fetch custom endpoint models");
+            const data = await res.json();
+            if (data && data.data && Array.isArray(data.data)) {
+              return data.data.map((m: any) => ({ id: m.id, name: m.id }));
+            }
+            throw new Error("Invalid format");
+          } catch (e) {
+            console.warn("Could not fetch custom models, using default", e);
+            return [{ id: "default", name: "Default Custom Model" }];
+          }
+        }
         return [];
+      }
     }
   } catch (error) {
     console.error(`Error fetching models for ${provider}:`, error);
@@ -174,7 +257,7 @@ export async function fetchModels(provider: AIProvider, keys: ApiKeys): Promise<
 
 const SYSTEM_PROMPT = `You are an expert literary analyst and character designer. Your task is to analyze a collection of character cards (from the same creator) and generate a comprehensive writing style guide that captures their unique authorial voice, formatting, and structural DNA.
 
-The output MUST be formatted as a Markdown document that closely matches the structure and sections of the "Elysiansyna Style Guide" example.
+The output MUST be formatted as a Markdown document that closely matches the structure and sections of the "ElysianSuns Style Guide" example.
 
 Required Sections:
 1. Description Structure & Template (How they format their character definitions)
@@ -206,16 +289,25 @@ async function callAIProvider(
   prompt: string,
   systemPrompt: string,
   jsonMode: boolean = false,
-  maxTokens: number = 4000,
+  maxTokens: number = 131072,
   model?: string
 ): Promise<string> {
   try {
+    let providerMaxTokens = maxTokens;
+    if (provider === "anthropic" && maxTokens < 5000) providerMaxTokens = maxTokens;
+    else if (provider === "openai" && maxTokens < 5000) providerMaxTokens = maxTokens;
+    else if (provider === "gemini" && maxTokens < 5000) providerMaxTokens = maxTokens;
+
+    const finalSystemPrompt = jsonMode 
+      ? `${systemPrompt}\n\nIMPORTANT: You must respond ONLY with valid JSON. Do not include any conversational text, markdown formatting, or explanations outside the JSON object. Ensure all strings are properly escaped.`
+      : systemPrompt;
+
     switch (provider) {
       case "gemini": {
         const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY });
         const config: any = {
-          maxOutputTokens: maxTokens,
-          systemInstruction: systemPrompt,
+          maxOutputTokens: providerMaxTokens,
+          systemInstruction: finalSystemPrompt,
         };
         if (jsonMode) {
           config.responseMimeType = "application/json";
@@ -238,8 +330,8 @@ async function callAIProvider(
           },
           body: JSON.stringify({
             model: model || "claude-3-opus-20240229",
-            max_tokens: maxTokens,
-            system: systemPrompt,
+            max_tokens: providerMaxTokens,
+            system: finalSystemPrompt,
             messages: [{ role: "user", content: prompt }],
           }),
         });
@@ -254,16 +346,16 @@ async function callAIProvider(
       case "openai": {
         const body: any = {
           model: model || "gpt-4-turbo-preview",
-          max_output_tokens: maxTokens,
-          input: [
-            { role: "system", content: systemPrompt },
+          max_completion_tokens: providerMaxTokens,
+          messages: [
+            { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
           ],
         };
         if (jsonMode) {
-          body.text = { format: { type: "json_object" } };
+          body.response_format = { type: "json_object" };
         }
-        const res = await fetch("https://api.openai.com/v1/responses", {
+        const res = await fetch("https://api.openai.com/v1/chat/completions", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -277,25 +369,56 @@ async function callAIProvider(
           throw new Error(`OpenAI API error: ${errMsg}`);
         }
         const data = await res.json();
-        const outputMessage = data.output?.find((item: any) => item.type === "message");
-        const textContent = outputMessage?.content?.find((c: any) => c.type === "output_text");
-        if (!textContent) {
-          throw new Error(`OpenAI returned no text output. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        const choice = data.choices?.[0];
+        if (!choice) {
+          throw new Error(`OpenAI returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
         }
-        return textContent.text || "";
+        return choice.message?.content || choice.text || "";
       }
-      case "openrouter": {
+      case "openai-responses": {
         const body: any = {
-          model: model || "anthropic/claude-3-opus",
-          max_completion_tokens: maxTokens,
-          messages: [
-            { role: "system", content: systemPrompt },
+          model: model || "gpt-4o",
+          max_completion_tokens: providerMaxTokens,
+          input: [
+            { role: "system", content: finalSystemPrompt },
             { role: "user", content: prompt }
           ],
         };
         if (jsonMode) {
           body.response_format = { type: "json_object" };
         }
+        const res = await fetch("https://api.openai.com/v1/responses", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${keys.openai}`,
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error?.message || errData.message || res.statusText;
+          throw new Error(`OpenAI Responses API error: ${errMsg}`);
+        }
+        const data = await res.json();
+        const choice = data.choices?.[0];
+        if (!choice || !choice.message) {
+          // If the shape is slightly different, fallback gracefully to returning JSON stringified
+          if (data.output) return typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
+          throw new Error(`OpenAI Responses returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        }
+        return choice.message?.content || choice.text || "";
+      }
+      case "openrouter": {
+        const body: any = {
+          model: model || "anthropic/claude-3-opus",
+          max_tokens: providerMaxTokens,
+          messages: [
+            { role: "system", content: finalSystemPrompt },
+            { role: "user", content: prompt }
+          ],
+        };
+        // OpenRouter models vary in JSON mode support, rely on prompt + regex parsing
         const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
           method: "POST",
           headers: {
@@ -318,27 +441,58 @@ async function callAIProvider(
         }
         return choice.message?.content || choice.text || "";
       }
+      case "openrouter-responses": {
+        const body: any = {
+          model: model || "anthropic/claude-3-opus",
+          max_tokens: providerMaxTokens,
+          input: [
+            { role: "system", content: finalSystemPrompt },
+            { role: "user", content: prompt }
+          ],
+        };
+        // OpenRouter models vary in JSON mode support, rely on prompt + regex parsing
+        const res = await fetch("https://openrouter.ai/api/v1/responses", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${keys.openrouter}`,
+            "HTTP-Referer": window.location.href,
+            "X-Title": "SillyTavern Style Guide Generator",
+          },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          const errMsg = errData.error?.message || errData.message || res.statusText;
+          throw new Error(`OpenRouter Responses API error: ${errMsg}`);
+        }
+        const data = await res.json();
+        const choice = data.choices?.[0];
+        if (!choice || !choice.message) {
+           if (data.output) return typeof data.output === 'string' ? data.output : JSON.stringify(data.output);
+           throw new Error(`OpenRouter Responses returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        }
+        return choice.message?.content || choice.text || "";
+      }
       case "custom": {
-        const capabilityKey = `${keys.customEndpoint}::${model || "default"}`;
+        const capabilityKey = keys.customEndpoint;
         const cachedSupport = customMaxCompletionSupport.get(capabilityKey);
 
         const createBody = (includeMaxCompletionTokens: boolean) => {
-          const b: any = {
+          const body: any = {
             model: model || "default",
             messages: [
-              { role: "system", content: systemPrompt },
+              { role: "system", content: finalSystemPrompt },
               { role: "user", content: prompt }
             ],
           };
           if (includeMaxCompletionTokens) {
-            b.max_completion_tokens = maxTokens;
+            body.max_completion_tokens = providerMaxTokens;
           } else {
-            b.max_tokens = maxTokens;
+            body.max_tokens = providerMaxTokens;
           }
-          if (jsonMode) {
-            b.response_format = { type: "json_object" };
-          }
-          return b;
+          // Custom endpoints vary in JSON mode support, rely on prompt + regex parsing
+          return body;
         };
 
         const sendRequest = async (includeMaxCompletionTokens: boolean) => {
@@ -381,8 +535,72 @@ async function callAIProvider(
 
         return result.data.choices[0].message.content;
       }
-      default:
+      default: {
+        if (provider.startsWith("custom-") && keys.customEndpoints) {
+          const ep = keys.customEndpoints.find(e => e.id === provider);
+          if (ep && ep.url && ep.key) {
+            const capabilityKey = ep.url;
+            const cachedSupport = customMaxCompletionSupport.get(capabilityKey);
+
+            const createBody = (includeMaxCompletionTokens: boolean) => {
+              const body: any = {
+                model: model || "default",
+                messages: [
+                  { role: "system", content: finalSystemPrompt },
+                  { role: "user", content: prompt }
+                ],
+              };
+              if (includeMaxCompletionTokens) {
+                body.max_completion_tokens = providerMaxTokens;
+              } else {
+                body.max_tokens = providerMaxTokens;
+              }
+              return body;
+            };
+
+            const sendRequest = async (includeMaxCompletionTokens: boolean) => {
+              const res = await fetch(ep.url, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "Authorization": `Bearer ${ep.key}`,
+                },
+                body: JSON.stringify(createBody(includeMaxCompletionTokens)),
+              });
+
+              if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                const errMsg = errData.error?.message || errData.message || res.statusText;
+                return { ok: false as const, errMsg };
+              }
+
+              const data = await res.json();
+              return { ok: true as const, data };
+            };
+
+            const shouldTryMaxCompletion = cachedSupport !== false;
+            let usedFallbackWithoutMaxCompletion = false;
+            let result = await sendRequest(shouldTryMaxCompletion);
+
+            if (!result.ok && shouldTryMaxCompletion && isUnsupportedMaxCompletionError(result.errMsg)) {
+              customMaxCompletionSupport.set(capabilityKey, false);
+              usedFallbackWithoutMaxCompletion = true;
+              result = await sendRequest(false);
+            }
+
+            if (!result.ok) {
+              throw new Error(`Custom API error: ${result.errMsg}`);
+            }
+
+            if (shouldTryMaxCompletion && !usedFallbackWithoutMaxCompletion) {
+              customMaxCompletionSupport.set(capabilityKey, true);
+            }
+
+            return result.data.choices[0].message.content;
+          }
+        }
         throw new Error("Unknown provider");
+      }
     }
   } catch (error) {
     console.error(`Error calling ${provider} API:`, error);
@@ -410,6 +628,134 @@ Example Messages: ${c.mes_example}
   return callAIProvider(provider, keys, prompt, SYSTEM_PROMPT, false, 16000, model);
 }
 
+const FANFIC_SYSTEM_PROMPT = `You are an expert literary analyst specializing in authorial voice. Your task is to read one or two pieces of fanfiction (prose) by a single author and reverse-engineer a comprehensive writing style guide that captures their unique authorial voice, prose techniques, and narrative DNA.
+
+You will often have only ONE or TWO works to analyze. This is intentional and sufficient — a skilled analyst can extract a rich, faithful voice profile from a small sample. Read closely. Infer the author's habits, instincts, and signature moves from concrete textual evidence rather than generic observations. Quote short, representative snippets from the prose to ground your observations.
+
+The output MUST be a polished Markdown document with the following sections:
+
+1. Authorial Voice Overview (A 2-3 paragraph portrait of how this author writes and what makes their voice recognizable)
+2. Prose Voice & Signature Techniques (Metaphor style, imagery, rhythm, recurring stylistic devices — with short quoted examples)
+3. Sentence Rhythm & Syntax (Sentence-length variation, fragments, run-ons, paragraph shape)
+4. Dialogue Voice & Speech Patterns (How characters speak, dialogue tags, subtext, banter, interruptions, dialect)
+5. Internal Monologue & POV Techniques (Narrative distance, tense, person, how thoughts and feelings are rendered)
+6. Pacing & Scene Construction (How scenes open and close, beats, transitions, how tension is built and released)
+7. Sensory & Descriptive Language (Which senses dominate, density of description, how settings and bodies are evoked)
+8. Emotional Register & Tonal Range (How emotion, intimacy, conflict, humor, and vulnerability are expressed)
+9. Thematic DNA & Recurring Motifs (Themes, obsessions, dynamics, and imagery the author returns to)
+10. Vocabulary & Diction (Signature words, phrases, verbal tics, register, profanity usage, distinctive word choices)
+11. Formatting & Punctuation Habits (Use of italics, em-dashes, ellipses, paragraph breaks, section breaks)
+12. Applying This Voice to Character Cards (Concrete guidance on how to write character descriptions, first messages, and dialogue so they sound like this author)
+13. Quick-Reference Checklist (A bulleted cheat-sheet a writer can follow to imitate this voice)
+
+Base every observation on evidence from the provided text. Do not invent biographical facts about the author. Output ONLY the Markdown document. Make it look professional and attractive.`;
+
+export interface FanficInput {
+  title: string;
+  author: string;
+  text: string;
+}
+
+const MAX_CHARS_PER_FIC = 60000;
+const MAX_TOTAL_CHARS = 140000;
+
+export async function generateStyleGuideFromFanfiction(
+  provider: AIProvider,
+  keys: ApiKeys,
+  fics: FanficInput[],
+  model?: string
+): Promise<string> {
+  let remainingBudget = MAX_TOTAL_CHARS;
+  const ficsData = fics.map((f, i) => {
+    const cap = Math.max(0, Math.min(MAX_CHARS_PER_FIC, remainingBudget));
+    let body = (f.text || "").trim();
+    let truncated = false;
+    if (body.length > cap) {
+      body = body.slice(0, cap);
+      truncated = true;
+    }
+    remainingBudget -= body.length;
+    const header = `--- Work ${i + 1}: "${f.title || "Untitled"}"${f.author ? ` by ${f.author}` : ""} ---`;
+    return `${header}\n${body}${truncated ? "\n\n[...excerpt truncated for length...]" : ""}`;
+  }).join("\n\n");
+
+  const authors = Array.from(new Set(fics.map(f => f.author.trim()).filter(Boolean)));
+  let authorLine: string;
+  if (authors.length === 1) {
+    authorLine = `All works below are by the same author: ${authors[0]}.`;
+  } else if (authors.length > 1) {
+    authorLine = `The works below are credited to multiple authors (${authors.join(", ")}). Build one combined voice profile, focusing on the shared, dominant authorial voice.`;
+  } else {
+    authorLine = `The works below are by a single author.`;
+  }
+
+  const prompt = `${authorLine} Analyze the following fanfiction prose and produce the comprehensive authorial style guide described in your instructions.\n\n${ficsData}\n\nGenerate the style guide now.`;
+
+  return callAIProvider(provider, keys, prompt, FANFIC_SYSTEM_PROMPT, false, 16000, model);
+}
+
+export interface StyleCombinationSuggestion {
+  compatibility: "high" | "medium" | "low";
+  verdict: string;
+  rationale: string;
+  recommendations: string[];
+}
+
+export async function suggestStyleCombination(
+  provider: AIProvider,
+  keys: ApiKeys,
+  guideA: { title: string; content: string; source?: string },
+  guideB: { title: string; content: string; source?: string },
+  model?: string
+): Promise<StyleCombinationSuggestion> {
+  const describe = (g: { title: string; content: string; source?: string }) =>
+    `${g.source === "fanfic" ? "Fanfiction-derived style guide" : "Character-card style guide"} titled "${g.title}":\n${g.content}`;
+
+  const prompt = `You are an expert literary analyst. Two writing style guides are provided below. One may be distilled from an author's fanfiction prose; the other may be derived from a creator's character cards. Your job is to judge whether these two styles can be productively COMBINED into a single coherent voice for writing roleplay character cards — especially their descriptions, first messages, and alternate greetings.
+
+Assess where the two voices reinforce each other and where they clash (e.g., conflicting tense/POV conventions, incompatible formatting rules, tonal mismatches). Be specific and base your judgment on the actual content of both guides.
+
+Return ONLY a valid JSON object with this exact shape (no markdown, no extra text):
+{
+  "compatibility": "high" | "medium" | "low",
+  "verdict": "A single concise sentence stating whether and how well they can be combined.",
+  "rationale": "2-4 sentences explaining the reasoning, citing concrete points of harmony and tension.",
+  "recommendations": ["Actionable tip on how to combine them", "What to take from the fanfiction voice", "What to keep from the card guide", "Any conflict to resolve"]
+}
+
+--- STYLE GUIDE A ---
+${describe(guideA)}
+
+--- STYLE GUIDE B ---
+${describe(guideB)}`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert literary analyst. Output only valid JSON.",
+    true,
+    4096,
+    model
+  );
+
+  try {
+    const parsed = parseJsonRobust(responseText);
+    const compatibility = ["high", "medium", "low"].includes(parsed.compatibility) ? parsed.compatibility : "medium";
+    return {
+      compatibility,
+      verdict: parsed.verdict || "These guides can be combined with some care.",
+      rationale: parsed.rationale || "",
+      recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations.filter((r: any) => typeof r === "string") : [],
+    };
+  } catch (e: any) {
+    console.error("Failed to parse combination suggestion JSON:", responseText);
+    throw new Error(`Failed to analyze style combination: ${e.message}`);
+  }
+}
+
+import { callAIProviderStream } from "./stream";
+
 export async function generateSlotContent(
   provider: AIProvider,
   keys: ApiKeys,
@@ -421,7 +767,9 @@ export async function generateSlotContent(
   otherSlots: { name: string; value: string }[],
   styleGuide: string,
   model?: string,
-  templateExample?: string
+  templateExample?: string,
+  vibePrompt?: string,
+  onChunk?: (text: string) => void
 ): Promise<string> {
   const contextStr = otherSlots
     .filter(s => s.value.trim() !== "")
@@ -443,9 +791,23 @@ ${currentValue.trim() !== ""
   ? `Refine, expand upon, or complete the following existing content for the field "${slotName}":\n\nEXISTING CONTENT:\n${currentValue}\n\nMake sure the final output incorporates the existing ideas but improves them according to the Style Guide.` 
   : `Generate ONLY the content for the field "${slotName}".`}
 ${slotDescription ? `\nField Description/Hint: ${slotDescription}` : ""}
+${vibePrompt ? `\nSPECIFIC INSTRUCTIONS / VIBE FOR THIS FIELD:\n"${vibePrompt}"\n` : ""}
 ${templateExample ? `\nEXAMPLE OF FILLED TEMPLATE (Use this as a strict reference for formatting, tone, length, and level of detail for this field):\n${templateExample}` : ""}
 
 Keep the response concise, directly applicable to the field, and written in the tone dictated by the Style Guide. Do not include the field name in your response. Return ONLY the raw generated text.`;
+
+  if (onChunk) {
+    return callAIProviderStream(
+      provider,
+      keys,
+      prompt,
+      'You are an expert roleplay character creator.',
+      onChunk,
+      false,
+      8192,
+      model
+    );
+  }
 
   const responseText = await callAIProvider(
     provider,
@@ -468,7 +830,8 @@ export async function generateCharacterCard(
   template?: string,
   model?: string,
   firstMessageIdea?: string,
-  templateExample?: string
+  templateExample?: string,
+  onChunk?: (text: string) => void
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
   
@@ -480,7 +843,46 @@ export async function generateCharacterCard(
     }
     prompt += `\nSTYLE GUIDE (dictates writing voice, prose style, and tone — follow its conventions for phrasing, detail level, and stylistic techniques):\n${styleGuide}\n`;
   } else {
-    prompt += `Create a character card using the ElysianSuns bracketed-section format. The card MUST use bracketed section headers (e.g., [Basic Information:, [Background:, [Core Personality:, etc.) with bullet points (* ) for each field.
+    prompt += `Create a character card using the ElysianSuns bracketed-section format. The card MUST use bracketed section headers with bullet points (* ) for each field.
+    
+REQUIRED FORMAT:
+[Basic Information:
+* Name:
+* Age:
+* Gender/Pronouns:
+* Occupation:
+* Appearance: ]
+[Background:
+* ]
+[Core Personality:
+* Archetype:
+* Traits:
+* Goal:
+* Behavioral Patterns:
+* Likes:
+* Dislikes: ]
+[Boundaries:
+* ]
+[Emotional Responses:
+* Positive Reactions:
+* Negative Reactions:
+* Neutral Responses: ]
+[Specific Scenarios and Responses:
+* ]
+[Dialogue: (These are merely examples of how {{char}} might speak and should not be used verbatim.)
+* Speech Style:
+* Greeting:
+* Angry Response:
+* Teasing:
+* Intimate: ]
+[Relationships:
+* ]
+[Sexual Behavior:
+* Sexual Orientation:
+* Genitalia:
+* Kinks:
+* During intercourse:
+* Unique Sexual Quirks: ]
 
 STYLE GUIDE (dictates writing voice, prose style, and tone — follow its conventions for phrasing, detail level, and stylistic techniques):
 ${styleGuide}
@@ -497,6 +899,7 @@ ${detailsStr}
 
 OUTPUT FORMAT:
 You MUST output ONLY valid JSON matching this structure. Do not include any other text, explanations, or markdown formatting outside the JSON object.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
 {
   "name": "string",
   "description": "string",
@@ -508,24 +911,37 @@ You MUST output ONLY valid JSON matching this structure. Do not include any othe
 
   const parseResponse = (text: string): CharacterCard => {
     try {
-      const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      const jsonStr = match ? match[1] : text;
-      return JSON.parse(jsonStr.trim());
-    } catch (e) {
+      return parseJsonRobust(text);
+    } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
-      throw new Error("AI did not return valid JSON.");
+      console.error("Parse error:", e);
+      throw new Error(`AI did not return valid JSON: ${e.message}`);
     }
   };
 
-  const responseText = await callAIProvider(
-    provider,
-    keys,
-    prompt,
-    "You are an expert character creator. Output only valid JSON.",
-    true,
-    4000,
-    model
-  );
+  let responseText: string;
+  if (onChunk) {
+    responseText = await callAIProviderStream(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      onChunk,
+      true,
+      131072,
+      model
+    );
+  } else {
+    responseText = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      true,
+      131072,
+      model
+    );
+  }
   return parseResponse(responseText);
 }
 
@@ -615,9 +1031,7 @@ ${templateExample}`;
 
   const parseResponse = (text: string) => {
     try {
-      const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      const jsonStr = match ? match[1] : text;
-      const parsed = JSON.parse(jsonStr.trim());
+      const parsed = parseJsonRobust(text);
       
       if (!Array.isArray(parsed)) {
         const possibleArray = Object.values(parsed).find(val => Array.isArray(val));
@@ -626,8 +1040,9 @@ ${templateExample}`;
       }
       
       return parsed;
-    } catch (e) {
+    } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
+      console.error("Parse error:", e);
       return [
         { name: "Background", description: "The character's history and lore." },
         { name: "Scenario", description: "The current situation or dynamic." }
@@ -642,7 +1057,7 @@ ${templateExample}`;
       prompt,
       "You are an expert character card analyst. Extract the required input fields from the provided template as a JSON array.",
       true,
-      4000,
+      8192,
       model
     );
     return parseResponse(responseText);
@@ -660,6 +1075,7 @@ export function extractSlotsFromGuide(): { name: string; description: string }[]
   // The style guide informs HOW to write (tone, prose, voice), not WHAT fields to extract.
   return [
     { name: "Age", description: "Character's age or age range" },
+    { name: "Gender/Pronouns", description: "Character's gender identity and pronouns" },
     { name: "Occupation", description: "Character's job, role, or source of income" },
     { name: "Appearance", description: "Physical description: height, build, hair, eyes, skin, distinguishing features, fashion, scent" },
     { name: "Background", description: "Origin story, key life events, and formative experiences that shaped who they are" },
@@ -673,9 +1089,14 @@ export function extractSlotsFromGuide(): { name: string; description: string }[]
     { name: "Positive Reactions", description: "How the character behaves when happy, comfortable, or affectionate" },
     { name: "Negative Reactions", description: "How the character behaves when angry, hurt, or threatened" },
     { name: "Neutral Responses", description: "Default behavior in everyday, low-stakes interactions" },
-    { name: "Specific Scenarios", description: "2-4 concrete example situations showing the character in action" },
+    { name: "Specific Scenarios and Responses", description: "2-4 concrete example situations showing the character in action" },
     { name: "Speech Style", description: "How the character talks: tone, vocabulary, verbal quirks, and example dialogue lines" },
+    { name: "Greeting", description: "Example of how they say hello" },
+    { name: "Angry Response", description: "Example of how they speak when angry" },
+    { name: "Teasing", description: "Example of how they tease" },
+    { name: "Intimate", description: "Example of how they speak intimately" },
     { name: "Relationships", description: "Key connections: {{user}}, family, friends, rivals, enemies — with brief descriptions of each dynamic" },
+    { name: "Sexual Orientation", description: "Character's sexual orientation" },
     { name: "Genitalia", description: "Physical intimate details" },
     { name: "Kinks", description: "Sexual preferences, dynamics, and turn-ons" },
     { name: "During intercourse", description: "Behavior, demeanor, and tendencies during sex" },
@@ -702,6 +1123,53 @@ export interface UniverseData {
   links: UniverseLink[];
 }
 
+import { SCRIPT_GUIDE } from "./scriptPrompt";
+
+export async function generateScript(
+  provider: AIProvider,
+  keys: ApiKeys,
+  promptText: string,
+  model?: string
+): Promise<string> {
+  const prompt = `You are an expert Character AI scripter, specializing in JanitorAI scripts.
+Your task is to generate a JavaScript script based on the user's request.
+
+${SCRIPT_GUIDE}
+
+USER REQUEST:
+${promptText}
+
+OUTPUT INSTRUCTIONS:
+- Output ONLY valid ES5 JavaScript code.
+- Do not include markdown code blocks (\`\`\`) in the final output, just the raw code.
+- Add brief comments explaining what the code does.
+- Ensure the code is safe and won't crash the bot.`;
+
+  let result = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    "You are an expert Character AI scripter. Output only the requested JavaScript code.",
+    false,
+    8192,
+    model
+  );
+  
+  // Clean up markdown if present
+  if (result.startsWith("\`\`\`javascript")) {
+    result = result.replace(/^\`\`\`javascript\n/, "");
+    result = result.replace(/\n\`\`\`$/, "");
+  } else if (result.startsWith("\`\`\`js")) {
+    result = result.replace(/^\`\`\`js\n/, "");
+    result = result.replace(/\n\`\`\`$/, "");
+  } else if (result.startsWith("\`\`\`")) {
+    result = result.replace(/^\`\`\`\n/, "");
+    result = result.replace(/\n\`\`\`$/, "");
+  }
+  
+  return result.trim();
+}
+
 export async function extractUniverse(
   provider: AIProvider,
   keys: ApiKeys,
@@ -722,7 +1190,8 @@ Look for characters, important objects, artifacts, locations, factions, and thei
 CRITICAL: You must create an ACTUAL relationship map. Do not just list entities. You must infer and create logical links between the characters, objects, and locations based on their descriptions and concepts.
 Also look for "pipeline" progressions (e.g., Character A was an NPC in Character B's story, then got their own card).${cardsContext}
 
-Return ONLY a valid JSON object with two arrays: "nodes" and "links".
+Return ONLY a valid JSON object with two arrays: "nodes" and "links". Do not include any markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings.
 - "nodes" should be an array of objects: { "id": "unique_id", "name": "Entity Name", "group": "character" | "object" | "location" | "faction" | "archetype", "description": "Short description" }
 - "links" should be an array of objects: { "source": "source_node_id", "target": "target_node_id", "type": "relationship" or "pipeline", "label": "Short description of link (e.g., 'Wields', 'Located In', 'Rivals', 'Allies With', 'Created')" }
 
@@ -734,91 +1203,100 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
 
   const parseResponse = (text: string): UniverseData => {
     try {
-      const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-      const jsonStr = match ? match[1] : text;
-      return JSON.parse(jsonStr.trim());
-    } catch (e) {
+      return parseJsonRobust(text);
+    } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
+      console.error("Parse error:", e);
       return { nodes: [], links: [] };
     }
   };
 
   try {
-    if (provider === "gemini") {
-      const ai = new GoogleGenAI({ apiKey: keys.gemini || "dummy" });
-      const response = await ai.models.generateContent({
-        model: model || "gemini-3.1-flash-preview",
-        contents: prompt,
-        config: { responseMimeType: "application/json" }
-      });
-      return parseResponse(response.text || "");
-    } else if (provider === "anthropic") {
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": keys.anthropic,
-          "anthropic-version": "2023-06-01",
-          "anthropic-dangerous-direct-browser-access": "true"
-        },
-        body: JSON.stringify({
-          model: model || "claude-3-5-sonnet-20240620",
-          max_tokens: 4000,
-          messages: [{ role: "user", content: prompt }]
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.content[0].text);
-    } else if (provider === "openai") {
-      const response = await fetch("https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${keys.openai}`
-        },
-        body: JSON.stringify({
-          model: model || "gpt-4o",
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" }
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.choices[0].message.content);
-    } else if (provider === "openrouter") {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${keys.openrouter}`
-        },
-        body: JSON.stringify({
-          model: model || "anthropic/claude-3.5-sonnet",
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" }
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.choices[0].message.content);
-    } else if (provider === "custom") {
-      const response = await fetch(keys.customEndpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${keys.customKey}`
-        },
-        body: JSON.stringify({
-          model: model || "",
-          messages: [{ role: "user", content: prompt }],
-          response_format: { type: "json_object" }
-        })
-      });
-      const data = await response.json();
-      return parseResponse(data.choices[0].message.content);
-    }
-    return { nodes: [], links: [] };
+    const responseText = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert relationship map generator. Output only valid JSON.",
+      true,
+      8192,
+      model
+    );
+    return parseResponse(responseText);
   } catch (error) {
     console.error("Error extracting universe:", error);
     return { nodes: [], links: [] };
+  }
+}
+
+export async function vibeForgeCard(
+  provider: AIProvider,
+  keys: ApiKeys,
+  vibePrompt: string,
+  slots: { name: string; description: string; value: string }[],
+  model?: string,
+  templateExample?: string,
+  styleGuide?: string,
+  onChunk?: (text: string) => void
+): Promise<{ name: string; concept: string; firstMessageIdea: string; slots: Record<string, string> }> {
+  const slotsPrompt = slots.map(s => `- ${s.name}: ${s.description}`).join("\n");
+
+  let prompt = `You are an expert character creator. I am building a character based on this "vibe" or description:
+"${vibePrompt}"
+
+Please generate a fitting Name, a Core Concept/Archetype, a First Message Idea, and appropriate content for the following character fields.
+Return ONLY a valid JSON object with the following structure. Do not include any markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
+{
+  "name": "Generated Name",
+  "concept": "Generated Core Concept",
+  "firstMessageIdea": "Generated First Message Idea",
+  "slots": {
+    "Field Name 1": "Generated Content 1",
+    "Field Name 2": "Generated Content 2"
+  }
+}
+
+Fields to generate:
+${slotsPrompt}
+`;
+
+  if (styleGuide) {
+    prompt += `\n\nFollow this style guide for tone and formatting:\n${styleGuide}`;
+  }
+  if (templateExample) {
+    prompt += `\n\nFollow this template structure:\n${templateExample}`;
+  }
+
+  let response: string;
+  if (onChunk) {
+    response = await callAIProviderStream(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      onChunk,
+      true,
+      131072,
+      model
+    );
+  } else {
+    response = await callAIProvider(
+      provider,
+      keys,
+      prompt,
+      "You are an expert character creator. Output only valid JSON.",
+      true,
+      131072,
+      model
+    );
+  }
+  
+  try {
+    return parseJsonRobust(response);
+  } catch (e: any) {
+    console.error("Failed to parse vibe forge JSON:", response);
+    console.error("Parse error:", e);
+    throw new Error(`Failed to parse generated character details: ${e.message}`);
   }
 }
 
@@ -830,7 +1308,8 @@ export async function autoFillSlots(
   slots: { name: string; description: string; value: string }[],
   model?: string,
   templateExample?: string,
-  styleGuide?: string
+  styleGuide?: string,
+  vibePrompt?: string
 ): Promise<Record<string, string>> {
   const emptySlots = slots.filter(s => !s.value.trim());
   if (emptySlots.length === 0) return {};
@@ -842,7 +1321,9 @@ export async function autoFillSlots(
   let prompt = `You are an expert character creator. I am building a character named "${name}" with the core concept/archetype of "${concept}".
 
 Please generate appropriate content for the following character fields.
-Return ONLY a JSON object where the keys are the exact field names and the values are the generated content.
+Return ONLY a valid JSON object where the keys are the exact field names and the values are the generated content. Do not include any markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings. Do NOT use unescaped newlines or control characters inside string values.
+${vibePrompt ? `\nADDITIONAL INSTRUCTIONS / VIBE FOR THESE TRAITS:\n"${vibePrompt}"\n` : ""}
 ${filledContext ? `\nALREADY FILLED DETAILS (use these for context and consistency):\n${filledContext}\n` : ""}
 FIELDS TO FILL:
 ${slotsPrompt}`;
@@ -861,16 +1342,15 @@ ${slotsPrompt}`;
     prompt,
     "You are an expert character creator. Output only valid JSON.",
     true,
-    4000,
+    8192,
     model
   );
 
   try {
-    const match = responseText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    const jsonStr = match ? match[1] : responseText;
-    return JSON.parse(jsonStr.trim());
-  } catch (e) {
-    console.error("Failed to parse auto-fill response", e);
+    return parseJsonRobust(responseText);
+  } catch (e: any) {
+    console.error("Failed to parse auto-fill response:", responseText);
+    console.error("Parse error:", e);
     return {};
   }
 }
@@ -931,13 +1411,47 @@ ${characterDetails}`;
   return callAIProvider(provider, keys, prompt, "You are an expert AI image prompt engineer.", false, 1000, model);
 }
 
+export async function suggestThemeSong(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: any,
+  model?: string
+): Promise<{ title: string; artist: string; reason: string }> {
+  const prompt = `Based on the following character card, suggest a fitting theme song for this character.
+Return ONLY a valid JSON object with the following structure, and no markdown formatting or other text.
+IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for newlines and \\" for quotes within strings.
+{
+  "title": "Song Title",
+  "artist": "Artist Name",
+  "reason": "A short 1-2 sentence explanation of why this song fits the character's personality, background, or vibe."
+}
+
+Character Card:
+${JSON.stringify(card, null, 2)}`;
+
+  const response = await callAIProvider(provider, keys, prompt, "You are a music supervisor and character analyst.", true, 500, model);
+  
+  try {
+    const parsed = parseJsonRobust(response);
+    return {
+      title: parsed.title || "Unknown Title",
+      artist: parsed.artist || "Unknown Artist",
+      reason: parsed.reason || "No reason provided."
+    };
+  } catch (e) {
+    console.error("Failed to parse theme song JSON:", response);
+    throw new Error("Failed to generate a valid theme song suggestion.");
+  }
+}
+
 export async function generateCharacterImage(
   keys: ApiKeys,
   prompt: string,
   model: string = "gemini-3.1-flash-image-preview",
   aspectRatio: string = "3:4",
   imageSize: string = "1K",
-  style: string = ""
+  style: string = "",
+  referenceImagesBase64: string[] = []
 ): Promise<string> {
   try {
     const ai = new GoogleGenAI({ apiKey: keys.gemini || process.env.GEMINI_API_KEY || "dummy" });
@@ -957,12 +1471,25 @@ export async function generateCharacterImage(
       config.imageConfig.imageSize = imageSize;
     }
 
+    const parts: any[] = [{ text: finalPrompt }];
+    
+    for (const refImage of referenceImagesBase64) {
+      const mimeType = refImage.match(/data:([a-zA-Z0-9]+\/[a-zA-Z0-9-.+]+).*,.*/)?.[1] || "image/jpeg";
+      const base64Data = refImage.split(",")[1];
+      if (base64Data) {
+        parts.push({
+          inlineData: {
+            data: base64Data,
+            mimeType: mimeType,
+          }
+        });
+      }
+    }
+
     const response = await ai.models.generateContent({
       model: model,
       contents: {
-        parts: [
-          { text: finalPrompt },
-        ],
+        parts: parts,
       },
       config
     });
@@ -977,5 +1504,115 @@ export async function generateCharacterImage(
   } catch (err) {
     console.error("Image generation failed:", err);
     throw err;
+  }
+}
+
+
+export async function generateAlternateGreeting(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: CharacterCard,
+  existingGreetings: string[],
+  model: string,
+  onChunk: (text: string) => void,
+  vibe?: string,
+  guide?: string
+): Promise<string> {
+  let prompt = `Generate a brand new, unique alternate greeting for the character ${card.name}.
+Do NOT use or repeat any of these existing greetings:
+${existingGreetings.map(g => '- ' + g).join('\
+')}
+
+Character details:
+${card.description ? 'Description: ' + card.description : ''}
+${card.personality ? 'Personality: ' + card.personality : ''}
+${card.scenario ? 'Scenario: ' + card.scenario : ''}
+`;
+
+  if (vibe) {
+    prompt += '\
+User requested tone/vibe for this greeting: ' + vibe;
+  }
+  if (guide) {
+    prompt += '\
+Style Guidelines:\
+' + guide;
+  }
+
+  prompt += '\
+\
+Write ONLY the new greeting text. Do not include introductory text, labels, or extra quotes.';
+
+  const responseText = await callAIProviderStream(
+    provider,
+    keys,
+    prompt,
+    'You are an expert roleplay character creator and writer.',
+    onChunk,
+    false,
+    131072,
+    model
+  );
+
+  return responseText;
+}
+
+
+export async function adaptCardToStyleGuide(
+  provider: AIProvider,
+  keys: ApiKeys,
+  rawText: string,
+  guideContent: string,
+  model: string,
+  onChunk: (text: string) => void
+): Promise<CharacterCard> {
+  const prompt = `You are an expert AI character creator and writer.
+Your task is to take the following character text/details and adapt it perfectly to the provided Style Guide.
+
+### Target Style Guide:
+${guideContent}
+
+### Character Details to Adapt:
+${rawText}
+
+Rewrite the character's description, personality, scenario, first message, etc. to perfectly match what the Style Guide requires.
+Do not omit details, just reformat and rewrite them in the requested style.
+
+You MUST return a valid JSON object matching this structure:
+{
+  "name": "Character Name",
+  "description": "Adapted description...",
+  "personality": "Adapted personality...",
+  "scenario": "Adapted scenario...",
+  "first_mes": "Adapted first message/greeting..."
+}
+Do not add any markdown blocks around the JSON.`;
+
+  onChunk('Adapting card to style guide...');
+  const responseText = await callAIProviderStream(
+    provider,
+    keys,
+    prompt,
+    'You are an expert roleplay character creator and JSON formatter.',
+    onChunk,
+    true, // jsonMode
+    131072,
+    model
+  );
+
+  try {
+    const parsed = parseJsonRobust(responseText);
+    return {
+      name: parsed.name || 'Adapted Character',
+      description: parsed.description || '',
+      personality: parsed.personality || '',
+      scenario: parsed.scenario || '',
+      first_mes: parsed.first_mes || '',
+      mes_example: parsed.mes_example || '',
+      alternate_greetings: parsed.alternate_greetings || []
+    };
+  } catch (e) {
+    console.error('Failed to parse adapted card JSON', e, responseText);
+    throw new Error('Failed to generate valid JSON for the adapted card.');
   }
 }

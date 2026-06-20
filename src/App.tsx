@@ -1,25 +1,44 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw, Eye, EyeOff, ClipboardPaste, LogIn, LogOut, Feather } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
 import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Checkbox } from "./components/ui/checkbox";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
 import { cn } from "./lib/utils";
-import { CharacterCard, parseFile, parsePdfToText, parseDocxToText } from "./lib/parser";
-import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData } from "./lib/api";
+import { CharacterCard, parseFile, parsePdfToText, parseDocxToText, parseFanficFile } from "./lib/parser";
+import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, generateStyleGuideFromFanfiction, FanficInput, suggestStyleCombination, StyleCombinationSuggestion, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
 import { DEFAULT_GUIDE_CONTENT } from "./lib/defaultGuide";
 import { CardTemplate, DEFAULT_TEMPLATES } from "./lib/templates";
 import ReactMarkdown from "react-markdown";
 import { motion, AnimatePresence } from "motion/react";
 import { toPng } from "html-to-image";
-import html2pdf from "html2pdf.js";
 import UniverseMap from "./components/UniverseMap";
 import { ModelSelector } from "./components/ModelSelector";
-import { useHistory } from "./hooks/useHistory";
 
-type ViewState = "upload" | "generate" | "saved" | "create" | "universe" | "settings";
+import { useHistory } from "./hooks/useHistory";
+import localforage from "localforage";
+
+// Firebase Imports
+import { auth, db, handleFirestoreError, OperationType } from "./lib/firebase";
+import { signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
+import { useAuthState } from "react-firebase-hooks/auth";
+import { collection, doc, getDocs, setDoc, deleteDoc, query, onSnapshot, writeBatch, serverTimestamp, getDoc } from "firebase/firestore";
+
+function ConfiguredModelSelector(props: Omit<React.ComponentProps<typeof ModelSelector>, 'customEndpoints'> & { apiKeys: ApiKeys }) {
+  return <ModelSelector {...props} customEndpoints={props.apiKeys.customEndpoints} />;
+}
+
+type ViewState = "upload" | "fanfiction" | "generate" | "saved" | "create" | "universe" | "script" | "settings";
+
+interface Fanfic {
+  id: string;
+  title: string;
+  author: string;
+  text: string;
+}
 const APP_AUTOSAVE_KEY = "st_app_autosave_v1";
 
 interface GuideVersion {
@@ -34,6 +53,30 @@ interface SavedGuide {
   content: string;
   date: string;
   versions?: GuideVersion[];
+  source?: "card" | "fanfic";
+}
+
+function GuideOptions({ guides }: { guides: SavedGuide[] }) {
+  const fanficGuides = guides.filter((g) => g.source === "fanfic");
+  const cardGuides = guides.filter((g) => g.source !== "fanfic");
+  return (
+    <>
+      {cardGuides.length > 0 && (
+        <optgroup label="Card Style Guides">
+          {cardGuides.map((g) => (
+            <option key={g.id} value={g.id}>{g.title}</option>
+          ))}
+        </optgroup>
+      )}
+      {fanficGuides.length > 0 && (
+        <optgroup label="Fanfiction Style Guides">
+          {fanficGuides.map((g) => (
+            <option key={g.id} value={g.id}>{g.title}</option>
+          ))}
+        </optgroup>
+      )}
+    </>
+  );
 }
 
 interface SavedCard {
@@ -41,6 +84,17 @@ interface SavedCard {
   name: string;
   concept: string;
   card: CharacterCard;
+  date: string;
+}
+
+interface SavedDraft {
+  id: string;
+  name: string;
+  concept: string;
+  slots: { name: string; description: string; value: string }[];
+  selectedGuide?: string;
+  selectedTemplate?: string;
+  firstMessageIdea?: string;
   date: string;
 }
 
@@ -62,19 +116,85 @@ function NavButton({ view, icon: Icon, label, currentView, setView }: any) {
     <button
       onClick={() => setView(view)}
       className={cn(
-        "flex-none md:w-full flex items-center gap-2 md:gap-3 px-3 py-2 md:px-4 md:py-3 rounded-xl text-sm font-medium transition-all duration-300",
+        "flex-none md:w-full flex-row flex items-center justify-center md:justify-start gap-2 md:gap-3 px-4 md:px-4 py-2.5 md:py-3 rounded-full md:rounded-xl text-[13px] md:text-sm transition-all duration-300 snap-center md:snap-align-none overflow-hidden relative",
         isActive 
-          ? "bg-white text-[#8B3A3A] shadow-sm border border-[#e5e4e2]" 
-          : "text-slate-600 hover:bg-white/50 hover:text-slate-900"
+          ? "text-[#8B3A3A] bg-white md:bg-white shadow-sm md:shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-black/5 md:border-[#e5e4e2]" 
+          : "bg-transparent text-slate-500 hover:bg-black/5 hover:text-slate-900 border border-transparent"
       )}
     >
-      <Icon className={cn("w-4 h-4 md:w-5 md:h-5", isActive ? "text-[#8B3A3A]" : "text-slate-400")} />
-      <span className="whitespace-nowrap">{label}</span>
+      <Icon className={cn("w-[18px] h-[18px] md:w-5 md:h-5 transition-transform duration-300 z-10", isActive ? "scale-110 text-[#8B3A3A]" : "")} strokeWidth={isActive ? 2.5 : 2} />
+      <span className={cn("z-10 whitespace-nowrap tracking-wide", isActive ? "font-bold md:font-semibold" : "font-medium")}>
+        {label}
+      </span>
     </button>
   );
 }
 
+function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: string, value: string, onChange: (e: any) => void, placeholder: string, disabled?: boolean }) {
+  const [show, setShow] = useState(false);
+  
+  const handlePaste = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      onChange({ target: { value: text } });
+    } catch (err) {
+      console.error("Paste failed, trying prompt as fallback", err);
+      const text = window.prompt("Paste your API key here:");
+      if (text !== null) {
+        onChange({ target: { value: text } });
+      }
+    }
+  };
+
+  return (
+    <div className="relative flex items-center w-full">
+      <Input
+        id={id}
+        type={show ? "text" : "password"}
+        placeholder={placeholder}
+        value={value}
+        onChange={onChange}
+        disabled={disabled}
+        className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] pr-[4.5rem] text-base w-full"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck="false"
+      />
+      <div className="absolute right-1 flex items-center gap-1.5 h-full px-1">
+        {navigator.clipboard ? (
+          <button
+            type="button"
+            onClick={handlePaste}
+            className="text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors flex items-center justify-center p-1.5"
+            title="Paste from clipboard"
+          >
+            <ClipboardPaste className="w-4 h-4" />
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setShow(!show)}
+          className="text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100 transition-colors flex items-center justify-center p-1.5"
+          title={show ? "Hide key" : "Show key"}
+        >
+          {show ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
+  const [user, loadingAuth] = useAuthState(auth);
+
+  const handleLogin = () => {
+    signInWithPopup(auth, new GoogleAuthProvider()).catch((error) => console.error("Login failed", error));
+  };
+  const handleLogout = () => {
+    signOut(auth);
+  };
+
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("theme");
@@ -94,6 +214,11 @@ export default function App() {
   const [view, setView] = useState<ViewState>("upload");
   const [cards, setCards] = useState<CharacterCard[]>([]);
   const [isParsing, setIsParsing] = useState(false);
+  const [fanfics, setFanfics] = useState<Fanfic[]>([]);
+  const [isParsingFanfic, setIsParsingFanfic] = useState(false);
+  const [currentGuideSource, setCurrentGuideSource] = useState<"card" | "fanfic" | null>(null);
+  const [combinationSuggestion, setCombinationSuggestion] = useState<StyleCombinationSuggestion | null>(null);
+  const [isSuggestingCombination, setIsSuggestingCombination] = useState(false);
   
   const [provider, setProvider] = useState<AIProvider>("gemini");
   const [apiKeys, setApiKeys] = useState<ApiKeys>({
@@ -103,6 +228,7 @@ export default function App() {
     openai: "",
     customEndpoint: "",
     customKey: "",
+    customEndpoints: [],
   });
 
   const [apiModels, setApiModels] = useState<Record<string, string>>({});
@@ -111,6 +237,10 @@ export default function App() {
   const [isFetchingModels, setIsFetchingModels] = useState<Record<string, boolean>>({});
 
   const [isGenerating, setIsGenerating] = useState(false);
+  const [guidesLoaded, setGuidesLoaded] = useState(false);
+  const [customTemplatesLoaded, setCustomTemplatesLoaded] = useState(false);
+  const [savedCardsLoaded, setSavedCardsLoaded] = useState(false);
+  const [savedDraftsLoaded, setSavedDraftsLoaded] = useState(false);
   const [currentGuide, setCurrentGuide] = useState<string | null>(null);
   const [currentGuideId, setCurrentGuideId] = useState<string | null>(null);
   const [isEditingGuide, setIsEditingGuide] = useState(false);
@@ -124,6 +254,10 @@ export default function App() {
   const [isExtractingUniverse, setIsExtractingUniverse] = useState(false);
   const [universeSelectedGuide, setUniverseSelectedGuide] = useState<string>("");
   const [universeSelectedCards, setUniverseSelectedCards] = useState<Set<string>>(new Set());
+  const [scriptPrompt, setScriptPrompt] = useState("");
+  const [generatedScript, setGeneratedScript] = useState("");
+  const [isGeneratingScript, setIsGeneratingScript] = useState(false);
+  const [scriptValidationError, setScriptValidationError] = useState<string | null>(null);
 
   const getProviderAndModel = (sectionId: string) => {
     const config = sectionConfigs[sectionId];
@@ -133,6 +267,11 @@ export default function App() {
   };
 
   // Card Forge State
+  const [vibePrompt, setVibePrompt] = useState("");
+  const [isVibeForging, setIsVibeForging] = useState(false);
+  const [autoFillVibe, setAutoFillVibe] = useState("");
+  const [slotVibes, setSlotVibes] = useState<Record<number, string>>({});
+  const [forgeActiveTab, setForgeActiveTab] = useState("details");
   const [forgeState, setForgeState, forgeHistory] = useHistory({
     name: "",
     concept: "",
@@ -157,7 +296,15 @@ export default function App() {
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
   const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>("");
   const [customTemplates, setCustomTemplates] = useState<CardTemplate[]>([]);
+  const [isTemplateEditorOpen, setIsTemplateEditorOpen] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateName, setEditingTemplateName] = useState("");
+  const [editingTemplateContent, setEditingTemplateContent] = useState("");
+  const [editingTemplateExample, setEditingTemplateExample] = useState("");
   const [isForging, setIsForging] = useState(false);
+  const [forgeError, setForgeError] = useState<string | null>(null);
+  const [forgeStreamText, setForgeStreamText] = useState<string>("");
+  const [lastForgeAction, setLastForgeAction] = useState<"forge" | "vibe" | null>(null);
   const [isExtractingSlots, setIsExtractingSlots] = useState(false);
   const [isSuggestingArchetype, setIsSuggestingArchetype] = useState(false);
   const [generatingSlotIndex, setGeneratingSlotIndex] = useState<number | null>(null);
@@ -166,8 +313,25 @@ export default function App() {
   
   const [imagePrompt, setImagePrompt] = useState("");
   const [isGeneratingImagePrompt, setIsGeneratingImagePrompt] = useState(false);
-  const [characterImage, setCharacterImage] = useState("");
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isGeneratingGreeting, setIsGeneratingGreeting] = useState(false);
+
+  // Greeting Studio — vibe-style greeting generation for saved or uploaded cards
+  const [studioCardSource, setStudioCardSource] = useState<"saved" | "upload">("saved");
+  const [studioSelectedCardId, setStudioSelectedCardId] = useState<string>("");
+  const [studioUploadedCard, setStudioUploadedCard] = useState<CharacterCard | null>(null);
+  const [studioSelectedGuide, setStudioSelectedGuide] = useState<string>("");
+  const [studioVibePrompt, setStudioVibePrompt] = useState("");
+  const [studioGeneratedGreeting, setStudioGeneratedGreeting] = useState<string>("");
+  const [isStudioGenerating, setIsStudioGenerating] = useState(false);
+
+  // Adapt Card — paste off-platform card text and rewrite to style guide
+  const [adaptRawText, setAdaptRawText] = useState("");
+  const [adaptSelectedGuide, setAdaptSelectedGuide] = useState<string>("");
+  const [adaptedCard, setAdaptedCard] = useState<CharacterCard | null>(null);
+  const [isAdapting, setIsAdapting] = useState(false);
+  
+  const [suggestedSong, setSuggestedSong] = useState<{title: string, artist: string, reason: string} | null>(null);
+  const [isSuggestingSong, setIsSuggestingSong] = useState(false);
 
   const [imageAspectRatio, setImageAspectRatio] = useState("3:4");
   const [imageSize, setImageSize] = useState("1K");
@@ -178,9 +342,113 @@ export default function App() {
   const setForgedCard = setForgedCardState;
   const [forgeBaseCard, setForgeBaseCard] = useState<CharacterCard | null>(null);
   const [savedCards, setSavedCards] = useState<SavedCard[]>([]);
+  const [savedDrafts, setSavedDrafts] = useState<SavedDraft[]>([]);
   const [hasHydratedAutosave, setHasHydratedAutosave] = useState(false);
 
+  const handleExportData = async () => {
+    const data = {
+      guides,
+      savedCards,
+      savedDrafts,
+      customTemplates,
+      apiKeys,
+      apiModels,
+      sectionConfigs,
+      provider,
+      appVersion: "1.0.0",
+      exportDate: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `styleforge_backup_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportData = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        
+        // Save to localforage / localStorage first
+        const promises = [];
+        
+        if (data.guides) {
+          setGuides(data.guides);
+          promises.push(localforage.setItem("st_style_guides", data.guides));
+        }
+        if (data.savedCards) {
+          setSavedCards(data.savedCards);
+          promises.push(localforage.setItem("st_saved_cards", data.savedCards));
+        }
+        if (data.savedDrafts) {
+          setSavedDrafts(data.savedDrafts);
+          promises.push(localforage.setItem("st_saved_drafts", data.savedDrafts));
+        }
+        if (data.customTemplates) {
+          setCustomTemplates(data.customTemplates);
+          promises.push(localforage.setItem("st_custom_templates", data.customTemplates));
+        }
+        if (data.apiKeys) {
+          setApiKeys(data.apiKeys);
+          localStorage.setItem("st_style_keys", JSON.stringify(data.apiKeys));
+        }
+        if (data.apiModels) {
+          setApiModels(data.apiModels);
+          localStorage.setItem("st_style_models", JSON.stringify(data.apiModels));
+        }
+        if (data.sectionConfigs) {
+          setSectionConfigs(data.sectionConfigs);
+          localStorage.setItem("st_section_configs", JSON.stringify(data.sectionConfigs));
+        }
+        if (data.provider) {
+          setProvider(data.provider);
+          localStorage.setItem("st_style_provider", data.provider);
+        }
+        
+        await Promise.all(promises);
+
+        alert("Data imported successfully. The page will reload to apply changes.");
+        window.location.reload();
+      } catch (err) {
+        console.error("Failed to import data", err);
+        alert("Failed to import data. Please ensure the file is a valid JSON backup.");
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const recoverLegacyData = () => {
+    const keys = ["st_style_guides", "st_saved_cards", "st_custom_templates", "st_saved_drafts", APP_AUTOSAVE_KEY];
+    let recoveredCount = 0;
+    
+    keys.forEach(key => {
+      const data = localStorage.getItem(key);
+      if (data) {
+        try {
+          const parsed = JSON.parse(data);
+          localforage.setItem(key, parsed);
+          recoveredCount++;
+        } catch (e) {}
+      }
+    });
+
+    if (recoveredCount > 0) {
+      alert(`Found and recovered ${recoveredCount} items from browser legacy storage. Please reload the page.`);
+      window.location.reload();
+    } else {
+      alert("No legacy data found in browser storage.");
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const fanficInputRef = useRef<HTMLInputElement>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
   const guideRef = useRef<HTMLDivElement>(null);
 
   // Load saved data
@@ -197,75 +465,247 @@ export default function App() {
     const savedProvider = localStorage.getItem("st_style_provider");
     if (savedProvider) setProvider(savedProvider as AIProvider);
 
-    const savedDraft = localStorage.getItem("st_forge_draft");
-    if (savedDraft) {
-      try {
-        const draft = JSON.parse(savedDraft);
-        if (draft.forgeName) setForgeName(draft.forgeName);
-        if (draft.forgeConcept) setForgeConcept(draft.forgeConcept);
-        if (draft.forgeSlots) setForgeSlots(draft.forgeSlots);
-        if (draft.forgeSelectedGuide) setForgeSelectedGuide(draft.forgeSelectedGuide);
-        if (draft.forgeSelectedTemplate) setForgeSelectedTemplate(draft.forgeSelectedTemplate);
-        if (draft.forgeFirstMessageIdea) setForgeFirstMessageIdea(draft.forgeFirstMessageIdea);
-      } catch (e) {
-        console.error("Failed to load draft", e);
+    localforage.getItem("st_forge_draft").then((savedDraftData: any) => {
+      if (savedDraftData) {
+        if (savedDraftData.forgeName) setForgeName(savedDraftData.forgeName);
+        if (savedDraftData.forgeConcept) setForgeConcept(savedDraftData.forgeConcept);
+        if (savedDraftData.forgeSlots) setForgeSlots(savedDraftData.forgeSlots);
+        if (savedDraftData.forgeSelectedGuide) setForgeSelectedGuide(savedDraftData.forgeSelectedGuide);
+        if (savedDraftData.forgeSelectedTemplate) setForgeSelectedTemplate(savedDraftData.forgeSelectedTemplate);
+        if (savedDraftData.forgeFirstMessageIdea) setForgeFirstMessageIdea(savedDraftData.forgeFirstMessageIdea);
+      } else {
+        const oldData = localStorage.getItem("st_forge_draft");
+        if (oldData) {
+          try {
+            const draft = JSON.parse(oldData);
+            if (draft.forgeName) setForgeName(draft.forgeName);
+            if (draft.forgeConcept) setForgeConcept(draft.forgeConcept);
+            if (draft.forgeSlots) setForgeSlots(draft.forgeSlots);
+            if (draft.forgeSelectedGuide) setForgeSelectedGuide(draft.forgeSelectedGuide);
+            if (draft.forgeSelectedTemplate) setForgeSelectedTemplate(draft.forgeSelectedTemplate);
+            if (draft.forgeFirstMessageIdea) setForgeFirstMessageIdea(draft.forgeFirstMessageIdea);
+            localforage.setItem("st_forge_draft", draft);
+          } catch (e) {
+            console.error("Failed to load draft", e);
+          }
+        }
       }
-    }
+    });
 
-    const savedGuides = localStorage.getItem("st_style_guides");
-    if (savedGuides) {
-      setGuides(JSON.parse(savedGuides));
-    } else {
-      setGuides([{
-        id: "default-elysiansyna",
-        title: "Elysiansyna Complete Style Guide v6.0",
-        content: DEFAULT_GUIDE_CONTENT,
-        date: new Date().toISOString(),
-        versions: []
-      }]);
-    }
-
-    const savedTemplates = localStorage.getItem("st_custom_templates");
-    if (savedTemplates) {
-      setCustomTemplates(JSON.parse(savedTemplates));
-    }
-
-    const savedCardsData = localStorage.getItem("st_saved_cards");
-    if (savedCardsData) {
-      setSavedCards(JSON.parse(savedCardsData));
-    }
-
-    const savedAppState = localStorage.getItem(APP_AUTOSAVE_KEY);
-    if (savedAppState) {
-      try {
-        const parsed = JSON.parse(savedAppState);
-        if (parsed.view) setView(parsed.view);
-        if (Array.isArray(parsed.cards)) setCards(parsed.cards);
-        if (typeof parsed.currentGuide === "string" || parsed.currentGuide === null) setCurrentGuide(parsed.currentGuide);
-        if (typeof parsed.currentGuideId === "string" || parsed.currentGuideId === null) setCurrentGuideId(parsed.currentGuideId);
-        if (typeof parsed.isEditingGuide === "boolean") setIsEditingGuide(parsed.isEditingGuide);
-        if (typeof parsed.editedGuideContent === "string") setEditedGuideContent(parsed.editedGuideContent);
-        if (typeof parsed.showVersions === "boolean") setShowVersions(parsed.showVersions);
-        if (Array.isArray(parsed.selectedGuides)) setSelectedGuides(new Set(parsed.selectedGuides));
-
-        if (parsed.universeData) setUniverseData(parsed.universeData);
-        if (typeof parsed.universeSelectedGuide === "string") setUniverseSelectedGuide(parsed.universeSelectedGuide);
-        if (Array.isArray(parsed.universeSelectedCards)) setUniverseSelectedCards(new Set(parsed.universeSelectedCards));
-
-        if (typeof parsed.showSavedCards === "boolean") setShowSavedCards(parsed.showSavedCards);
-        if (typeof parsed.imagePrompt === "string") setImagePrompt(parsed.imagePrompt);
-        if (typeof parsed.characterImage === "string") setCharacterImage(parsed.characterImage);
-        if (typeof parsed.imageAspectRatio === "string") setImageAspectRatio(parsed.imageAspectRatio);
-        if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
-        if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
-        if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
-      } catch (e) {
-        console.error("Failed to load app autosave", e);
+    localforage.getItem("st_style_guides").then((savedGuidesData: any) => {
+      let finalGuides = null;
+      if (savedGuidesData && Array.isArray(savedGuidesData) && savedGuidesData.length > 0) {
+        finalGuides = savedGuidesData;
+      } else {
+        const oldData = localStorage.getItem("st_style_guides");
+        if (oldData) {
+          try {
+            const parsed = JSON.parse(oldData);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              finalGuides = parsed;
+              localforage.setItem("st_style_guides", parsed);
+            }
+          } catch (e) {}
+        }
       }
-    }
 
-    setHasHydratedAutosave(true);
+      if (finalGuides) {
+        setGuides(finalGuides);
+      } else {
+        setGuides([{
+          id: "default-elysiansuns",
+          title: "ElysianSuns Complete Style Guide v6.0",
+          content: DEFAULT_GUIDE_CONTENT,
+          date: new Date().toISOString(),
+          versions: []
+        }]);
+      }
+      setGuidesLoaded(true);
+    });
+
+    localforage.getItem("st_custom_templates").then((savedTemplatesData: any) => {
+      if (savedTemplatesData && Array.isArray(savedTemplatesData) && savedTemplatesData.length > 0) {
+        setCustomTemplates(savedTemplatesData);
+      } else {
+        const oldData = localStorage.getItem("st_custom_templates");
+        if (oldData) {
+          try {
+            const parsed = JSON.parse(oldData);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setCustomTemplates(parsed);
+              localforage.setItem("st_custom_templates", parsed);
+            }
+          } catch (e) {}
+        }
+      }
+      setCustomTemplatesLoaded(true);
+    });
+
+    localforage.getItem("st_saved_cards").then((savedCardsData: any) => {
+      if (savedCardsData && Array.isArray(savedCardsData) && savedCardsData.length > 0) {
+        setSavedCards(savedCardsData);
+      } else {
+        const oldData = localStorage.getItem("st_saved_cards");
+        if (oldData) {
+          try {
+            const parsed = JSON.parse(oldData);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              setSavedCards(parsed);
+              localforage.setItem("st_saved_cards", parsed);
+            }
+          } catch (e) {}
+        }
+      }
+      setSavedCardsLoaded(true);
+    });
+
+    localforage.getItem("st_saved_drafts").then((savedDraftsData: any) => {
+      if (savedDraftsData) setSavedDrafts(savedDraftsData);
+      setSavedDraftsLoaded(true);
+    });
+
+    localforage.getItem(APP_AUTOSAVE_KEY).then((savedAppState: any) => {
+      let parsed = savedAppState;
+      if (!parsed) {
+        const oldData = localStorage.getItem(APP_AUTOSAVE_KEY);
+        if (oldData) {
+          try {
+            parsed = JSON.parse(oldData);
+            localforage.setItem(APP_AUTOSAVE_KEY, parsed);
+          } catch (e) {}
+        }
+      }
+
+      if (parsed) {
+        try {
+          if (parsed.view) setView(parsed.view);
+          if (Array.isArray(parsed.cards)) setCards(parsed.cards);
+          if (Array.isArray(parsed.fanfics)) setFanfics(parsed.fanfics);
+          if (typeof parsed.currentGuide === "string" || parsed.currentGuide === null) setCurrentGuide(parsed.currentGuide);
+          if (typeof parsed.currentGuideId === "string" || parsed.currentGuideId === null) setCurrentGuideId(parsed.currentGuideId);
+          if (parsed.currentGuideSource === "card" || parsed.currentGuideSource === "fanfic" || parsed.currentGuideSource === null) setCurrentGuideSource(parsed.currentGuideSource);
+          if (typeof parsed.isEditingGuide === "boolean") setIsEditingGuide(parsed.isEditingGuide);
+          if (typeof parsed.editedGuideContent === "string") setEditedGuideContent(parsed.editedGuideContent);
+          if (typeof parsed.showVersions === "boolean") setShowVersions(parsed.showVersions);
+          if (Array.isArray(parsed.selectedGuides)) setSelectedGuides(new Set(parsed.selectedGuides));
+
+          if (parsed.universeData) setUniverseData(parsed.universeData);
+          if (typeof parsed.universeSelectedGuide === "string") setUniverseSelectedGuide(parsed.universeSelectedGuide);
+          if (Array.isArray(parsed.universeSelectedCards)) setUniverseSelectedCards(new Set(parsed.universeSelectedCards));
+
+          if (typeof parsed.showSavedCards === "boolean") setShowSavedCards(parsed.showSavedCards);
+          if (typeof parsed.imagePrompt === "string") setImagePrompt(parsed.imagePrompt);
+          if (typeof parsed.imageAspectRatio === "string") setImageAspectRatio(parsed.imageAspectRatio);
+          if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
+          if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
+          if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
+        } catch (e) {
+          console.error("Failed to load app autosave", e);
+        }
+      }
+      setHasHydratedAutosave(true);
+    });
   }, []);
+
+  // Firebase Sync
+  useEffect(() => {
+    if (!user) return;
+    const fetchFromFirebase = async () => {
+      try {
+        const guidesSnap = await getDocs(collection(db, "users", user.uid, "style_guides"));
+        const cardsSnap = await getDocs(collection(db, "users", user.uid, "saved_cards"));
+        const templatesSnap = await getDocs(collection(db, "users", user.uid, "custom_templates"));
+        const draftsSnap = await getDocs(collection(db, "users", user.uid, "character_drafts"));
+        
+        let fbGuides: any[] = [];
+        guidesSnap.forEach(doc => fbGuides.push(doc.data()));
+        
+        let fbCards: any[] = [];
+        cardsSnap.forEach(doc => fbCards.push(doc.data()));
+        
+        let fbTemplates: any[] = [];
+        templatesSnap.forEach(doc => fbTemplates.push(doc.data()));
+        
+        let fbDrafts: any[] = [];
+        draftsSnap.forEach(doc => fbDrafts.push(doc.data()));
+
+        // If Firebase has data, use it. If not, maybe upload existing local data?
+        if (fbGuides.length > 0) setGuides(fbGuides);
+        else if (guides.length > 0) {
+          guides.forEach(async (g) => {
+            try {
+              if (g.id) await setDoc(doc(db, "users", user.uid, "style_guides", g.id), { ...g, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
+            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "style_guides"); }
+          });
+        }
+        
+        if (fbCards.length > 0) setSavedCards(fbCards);
+        else if (savedCards.length > 0) {
+          savedCards.forEach(async (c) => {
+            try {
+              if (c.id) await setDoc(doc(db, "users", user.uid, "saved_cards", c.id), { ...c, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
+            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "saved_cards"); }
+          });
+        }
+        
+        if (fbTemplates.length > 0) setCustomTemplates(fbTemplates);
+        else if (customTemplates.length > 0) {
+          customTemplates.forEach(async (t) => {
+            try {
+              if (t.id) await setDoc(doc(db, "users", user.uid, "custom_templates", t.id), { ...t, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
+            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "custom_templates"); }
+          });
+        }
+        
+        if (fbDrafts.length > 0) setSavedDrafts(fbDrafts);
+        else if (savedDrafts.length > 0) {
+          savedDrafts.forEach(async (d) => {
+            try {
+              if (d.id) await setDoc(doc(db, "users", user.uid, "character_drafts", d.id), { ...d, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
+            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "character_drafts"); }
+          });
+        }
+
+      } catch (e) {
+        console.error("Firebase sync error", e);
+      }
+    };
+    fetchFromFirebase();
+  }, [user]);
+
+  // Sync back to Firebase on change if user logged in
+  useEffect(() => {
+    if (!user || !guidesLoaded) return;
+    guides.forEach(async (g) => {
+      if (g.id) {
+        try {
+          await setDoc(doc(db, "users", user.uid, "style_guides", g.id), { ...g, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+        } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "style_guides"); }
+      }
+    });
+  }, [guides, user, guidesLoaded]);
+
+  useEffect(() => {
+    if (!user || !savedCardsLoaded) return;
+    savedCards.forEach(async (c) => {
+      if (c.id) {
+        try {
+          await setDoc(doc(db, "users", user.uid, "saved_cards", c.id), { ...c, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+        } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "saved_cards"); }
+      }
+    });
+  }, [savedCards, user, savedCardsLoaded]);
+
+  useEffect(() => {
+    if (!user || !customTemplatesLoaded) return;
+    customTemplates.forEach(async (t) => {
+      if (t.id) {
+        try {
+          await setDoc(doc(db, "users", user.uid, "custom_templates", t.id), { ...t, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+        } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "custom_templates"); }
+      }
+    });
+  }, [customTemplates, user, customTemplatesLoaded]);
 
   // Save keys
   useEffect(() => {
@@ -285,8 +725,10 @@ export default function App() {
   }, [provider]);
 
   useEffect(() => {
-    localStorage.setItem("st_style_guides", JSON.stringify(guides));
-  }, [guides]);
+    if (guidesLoaded) {
+      localforage.setItem("st_style_guides", guides).catch(e => console.error(e));
+    }
+  }, [guides, guidesLoaded]);
 
   // Save drafts
   useEffect(() => {
@@ -298,7 +740,7 @@ export default function App() {
       forgeSelectedTemplate,
       forgeFirstMessageIdea
     };
-    localStorage.setItem("st_forge_draft", JSON.stringify(draft));
+    localforage.setItem("st_forge_draft", draft).catch(e => console.error(e));
   }, [forgeName, forgeConcept, forgeSlots, forgeSelectedGuide, forgeSelectedTemplate, forgeFirstMessageIdea]);
 
   useEffect(() => {
@@ -306,8 +748,10 @@ export default function App() {
     const appState = {
       view,
       cards,
+      fanfics,
       currentGuide,
       currentGuideId,
+      currentGuideSource,
       isEditingGuide,
       editedGuideContent,
       showVersions,
@@ -317,20 +761,26 @@ export default function App() {
       universeSelectedCards: Array.from(universeSelectedCards),
       showSavedCards,
       imagePrompt,
-      characterImage,
       imageAspectRatio,
       imageSize,
       imageStyle,
       forgedCard,
       forgeBaseCard
     };
-    localStorage.setItem(APP_AUTOSAVE_KEY, JSON.stringify(appState));
+    localforage.setItem(APP_AUTOSAVE_KEY, appState).catch(e => console.error(e));
+    if (user) {
+      setDoc(doc(db, "users", user.uid, "app_state", "autosave"), { ...appState, userId: user.uid, updatedAt: Date.now() }).catch(err => {
+        console.warn("Autosave Firebase sync error", err);
+      });
+    }
   }, [
     hasHydratedAutosave,
     view,
     cards,
+    fanfics,
     currentGuide,
     currentGuideId,
+    currentGuideSource,
     isEditingGuide,
     editedGuideContent,
     showVersions,
@@ -340,7 +790,6 @@ export default function App() {
     universeSelectedCards,
     showSavedCards,
     imagePrompt,
-    characterImage,
     imageAspectRatio,
     imageSize,
     imageStyle,
@@ -354,8 +803,12 @@ export default function App() {
   // Fetch models when key or provider changes
   useEffect(() => {
     const fetchProviderModels = async (p: AIProvider) => {
-      const key = p === "custom" ? apiKeys.customKey : apiKeys[p as keyof ApiKeys];
-      if (!key && p !== "gemini" && p !== "openai" && p !== "anthropic" && p !== "openrouter") return;
+      let keyName = p;
+      if (p === "openai-responses") keyName = "openai";
+      else if (p === "openrouter-responses") keyName = "openrouter";
+      
+      const key = p === "custom" ? apiKeys.customKey : apiKeys[keyName as keyof ApiKeys];
+      if (!key && p !== "gemini" && p !== "openai" && p !== "openai-responses" && p !== "anthropic" && p !== "openrouter" && p !== "openrouter-responses") return;
       
       setIsFetchingModels(prev => ({ ...prev, [p]: true }));
       try {
@@ -386,16 +839,30 @@ export default function App() {
     // Fetch for any provider whose key changed
     if (apiKeys.gemini !== prevKeys.gemini) fetchProviderModels("gemini");
     if (apiKeys.anthropic !== prevKeys.anthropic) fetchProviderModels("anthropic");
-    if (apiKeys.openai !== prevKeys.openai) fetchProviderModels("openai");
-    if (apiKeys.openrouter !== prevKeys.openrouter) fetchProviderModels("openrouter");
+    if (apiKeys.openai !== prevKeys.openai) {
+      fetchProviderModels("openai");
+      fetchProviderModels("openai-responses");
+    }
+    if (apiKeys.openrouter !== prevKeys.openrouter) {
+      fetchProviderModels("openrouter");
+      fetchProviderModels("openrouter-responses");
+    }
     if (apiKeys.customEndpoint !== prevKeys.customEndpoint || apiKeys.customKey !== prevKeys.customKey) {
       fetchProviderModels("custom");
+    }
+    if (apiKeys.customEndpoints !== prevKeys.customEndpoints) {
+      apiKeys.customEndpoints?.forEach(ep => {
+        fetchProviderModels(ep.id);
+      });
     }
 
     // Initial fetch for all providers on mount
     if (prevKeys === apiKeys && prevProvider === provider) {
-      (["gemini", "anthropic", "openai", "openrouter", "custom"] as AIProvider[]).forEach(p => {
+      (["gemini", "anthropic", "openai", "openai-responses", "openrouter", "openrouter-responses", "custom"] as AIProvider[]).forEach(p => {
         fetchProviderModels(p);
+      });
+      apiKeys.customEndpoints?.forEach(ep => {
+        fetchProviderModels(ep.id);
       });
     }
 
@@ -458,8 +925,9 @@ export default function App() {
         if (card && card.name) {
           newCards.push(card);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error("Failed to parse file", e.target.files[i].name, err);
+        alert(`Failed to parse file ${e.target.files[i].name}:\n${err?.message || err}`);
       }
     }
     
@@ -480,6 +948,68 @@ export default function App() {
     
     setIsParsing(false);
     if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleFanficUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.length) return;
+    setIsParsingFanfic(true);
+
+    const newFics: Fanfic[] = [];
+    for (let i = 0; i < e.target.files.length; i++) {
+      const file = e.target.files[i];
+      try {
+        const { title, text } = await parseFanficFile(file);
+        if (!text || text.trim().length < 50) {
+          alert(`"${file.name}" produced little or no readable text. If it is a scanned PDF, try a text-based PDF or DOCX/TXT instead.`);
+          continue;
+        }
+        newFics.push({
+          id: Date.now().toString() + "_" + i,
+          title,
+          author: "",
+          text: text.trim(),
+        });
+      } catch (err: any) {
+        console.error("Failed to parse fanfic", file.name, err);
+        alert(`Failed to parse ${file.name}:\n${err?.message || err}`);
+      }
+    }
+
+    if (newFics.length > 0) {
+      setFanfics((prev) => [...prev, ...newFics]);
+    }
+
+    setIsParsingFanfic(false);
+    if (fanficInputRef.current) fanficInputRef.current.value = "";
+  };
+
+  const removeFanfic = (id: string) => {
+    setFanfics((prev) => prev.filter((f) => f.id !== id));
+  };
+
+  const updateFanfic = (id: string, field: "title" | "author", value: string) => {
+    setFanfics((prev) => prev.map((f) => (f.id === id ? { ...f, [field]: value } : f)));
+  };
+
+  const handleGenerateFromFanfiction = async () => {
+    if (fanfics.length === 0) return;
+    setIsGenerating(true);
+    setView("generate");
+    try {
+      const { currentProvider, currentModel } = getProviderAndModel("fanfiction");
+      const fics: FanficInput[] = fanfics.map((f) => ({ title: f.title, author: f.author, text: f.text }));
+      const result = await generateStyleGuideFromFanfiction(currentProvider, apiKeys, fics, currentModel);
+      setCurrentGuide(result);
+      setCurrentGuideId(null);
+      setCurrentGuideSource("fanfic");
+      setIsEditingGuide(false);
+      setShowVersions(false);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to generate guide from fanfiction. Check console for details.");
+    } finally {
+      setIsGenerating(false);
+    }
   };
 
   const removeCard = (index: number) => {
@@ -519,6 +1049,120 @@ export default function App() {
     };
     reader.readAsText(file);
     e.target.value = "";
+  };
+
+  const openTemplateEditor = async (templateId?: string) => {
+    let draftStr: any = await localforage.getItem("st_template_draft");
+    if (!draftStr) {
+      const oldDraft = localStorage.getItem("st_template_draft");
+      if (oldDraft) {
+        try {
+          draftStr = JSON.parse(oldDraft);
+          localforage.setItem("st_template_draft", draftStr);
+        } catch (e) {}
+      }
+    }
+
+    let useDraft = false;
+    if (draftStr) {
+      if (confirm("You have an unsaved template draft. Would you like to restore it?")) {
+        try {
+          const draft = draftStr;
+          setEditingTemplateId(draft.id);
+          setEditingTemplateName(draft.name);
+          setEditingTemplateContent(draft.content);
+          setEditingTemplateExample(draft.example);
+          useDraft = true;
+        } catch (e) {
+          console.error("Failed to parse template draft", e);
+        }
+      } else {
+        localforage.removeItem("st_template_draft");
+      }
+    }
+
+    if (!useDraft) {
+      if (templateId) {
+        const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === templateId);
+        if (template) {
+          setEditingTemplateId(template.id.startsWith('custom-') ? template.id : null);
+          setEditingTemplateName(template.id.startsWith('custom-') ? template.name : `${template.name} (Copy)`);
+          setEditingTemplateContent(template.content);
+          setEditingTemplateExample(template.example || "");
+        }
+      } else {
+        setEditingTemplateId(null);
+        setEditingTemplateName("");
+        setEditingTemplateContent("");
+        setEditingTemplateExample("");
+      }
+    }
+    setIsTemplateEditorOpen(true);
+  };
+
+  const handleTemplateFieldChange = (field: 'name' | 'content' | 'example', value: string) => {
+    let newName = editingTemplateName;
+    let newContent = editingTemplateContent;
+    let newExample = editingTemplateExample;
+
+    if (field === 'name') {
+      newName = value;
+      setEditingTemplateName(value);
+    } else if (field === 'content') {
+      newContent = value;
+      setEditingTemplateContent(value);
+    } else if (field === 'example') {
+      newExample = value;
+      setEditingTemplateExample(value);
+    }
+
+    const draft = {
+      id: editingTemplateId,
+      name: newName,
+      content: newContent,
+      example: newExample
+    };
+    localforage.setItem("st_template_draft", draft).catch(e => console.error(e));
+  };
+
+  const saveTemplate = () => {
+    if (!editingTemplateName.trim() || !editingTemplateContent.trim()) {
+      alert("Template name and content are required.");
+      return;
+    }
+
+    if (editingTemplateId) {
+      setCustomTemplates(prev => prev.map(t => t.id === editingTemplateId ? {
+        ...t,
+        name: editingTemplateName,
+        content: editingTemplateContent,
+        example: editingTemplateExample
+      } : t));
+      setForgeSelectedTemplate(editingTemplateId);
+    } else {
+      const newTemplate: CardTemplate = {
+        id: `custom-${Date.now()}`,
+        name: editingTemplateName,
+        content: editingTemplateContent,
+        example: editingTemplateExample
+      };
+      setCustomTemplates(prev => [...prev, newTemplate]);
+      setForgeSelectedTemplate(newTemplate.id);
+    }
+    localforage.removeItem("st_template_draft");
+    setIsTemplateEditorOpen(false);
+  };
+
+  const deleteCustomTemplate = (id: string) => {
+    if (confirm("Are you sure you want to delete this custom template?")) {
+      setCustomTemplates(prev => prev.filter(t => t.id !== id));
+      if (user) {
+        deleteDoc(doc(db, "users", user.uid, "custom_templates", id)).catch(e => handleFirestoreError(e, OperationType.DELETE, "custom_templates"));
+      }
+      if (forgeSelectedTemplate === id) {
+        setForgeSelectedTemplate("");
+      }
+    }
   };
 
   const normalizeSlotName = (name: string) =>
@@ -568,6 +1212,7 @@ export default function App() {
       setForgeConcept(uploadedCard.personality || "");
       setForgeFirstMessageIdea(uploadedCard.first_mes || uploadedCard.scenario || "");
       setForgedCard(uploadedCard);
+      setSuggestedSong(null);
       setForgeSlots(prev => applyCardToSlots(prev, uploadedCard));
       setView("create");
       alert("Base card loaded into Card Forge. Choose a style guide/template and use AI tools to alternate it.");
@@ -620,6 +1265,7 @@ export default function App() {
       const result = await generateStyleGuide(currentProvider, apiKeys, cards, currentModel);
       setCurrentGuide(result);
       setCurrentGuideId(null);
+      setCurrentGuideSource("card");
       setIsEditingGuide(false);
       setShowVersions(false);
       setView("generate");
@@ -642,6 +1288,7 @@ export default function App() {
       const result = await mergeStyleGuides(currentProvider, apiKeys, guidesToMerge, currentModel);
       setCurrentGuide(result);
       setCurrentGuideId(null);
+      setCurrentGuideSource("card");
       setIsEditingGuide(false);
       setShowVersions(false);
       setView("generate");
@@ -651,6 +1298,33 @@ export default function App() {
       alert("Failed to merge guides. Check console for details.");
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const handleSuggestCombination = async () => {
+    const selected = guides.filter((g) => selectedGuides.has(g.id));
+    if (selected.length !== 2) return;
+    setIsSuggestingCombination(true);
+    setCombinationSuggestion(null);
+    try {
+      // Order so a fanfiction guide (if present) is presented first for clearer framing.
+      const ordered = [...selected].sort((a, b) =>
+        (a.source === "fanfic" ? 0 : 1) - (b.source === "fanfic" ? 0 : 1)
+      );
+      const { currentProvider, currentModel } = getProviderAndModel("library");
+      const result = await suggestStyleCombination(
+        currentProvider,
+        apiKeys,
+        { title: ordered[0].title, content: ordered[0].content, source: ordered[0].source },
+        { title: ordered[1].title, content: ordered[1].content, source: ordered[1].source },
+        currentModel
+      );
+      setCombinationSuggestion(result);
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to analyze combination: " + (err.message || err));
+    } finally {
+      setIsSuggestingCombination(false);
     }
   };
 
@@ -665,7 +1339,8 @@ export default function App() {
       title: title,
       content: currentGuide,
       date: new Date().toISOString(),
-      versions: []
+      versions: [],
+      source: currentGuideSource || "card"
     };
     setGuides((prev) => [newGuide, ...prev]);
     setCurrentGuideId(newGuide.id);
@@ -718,16 +1393,198 @@ export default function App() {
     alert("Reverted to previous version!");
   };
 
-  const exportPDF = () => {
-    if (!guideRef.current) return;
-    const opt = {
-      margin: 15,
-      filename: 'style-guide.pdf',
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: 'mm' as const, format: 'a4' as const, orientation: 'portrait' as const }
-    };
-    html2pdf().set(opt).from(guideRef.current).save();
+  const exportPDF = async () => {
+    if (!currentGuide) return;
+    try {
+      // Render the PDF directly from the markdown source via jsPDF.
+      // Avoids html2canvas, which cannot parse Tailwind v4's oklch() colors.
+      const { jsPDF } = await import('jspdf');
+      const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const pageHeight = doc.internal.pageSize.getHeight();
+      const marginX = 18;
+      const marginY = 20;
+      const contentWidth = pageWidth - marginX * 2;
+      let y = marginY;
+
+      const hexToRgb = (hex: string): [number, number, number] => {
+        const h = hex.replace('#', '');
+        return [
+          parseInt(h.slice(0, 2), 16),
+          parseInt(h.slice(2, 4), 16),
+          parseInt(h.slice(4, 6), 16),
+        ];
+      };
+
+      const ensureSpace = (needed: number) => {
+        if (y + needed > pageHeight - marginY) {
+          doc.addPage();
+          y = marginY;
+        }
+      };
+
+      const writeBlock = (
+        text: string,
+        opts: {
+          size: number;
+          font: 'helvetica' | 'times';
+          style: 'normal' | 'bold' | 'italic' | 'bolditalic';
+          color: string;
+          indent?: number;
+          lineHeight?: number;
+          spaceBefore?: number;
+          spaceAfter?: number;
+        }
+      ) => {
+        const indent = opts.indent ?? 0;
+        const lineHeight = opts.lineHeight ?? opts.size * 0.42;
+        if (opts.spaceBefore) y += opts.spaceBefore;
+        doc.setFont(opts.font, opts.style);
+        doc.setFontSize(opts.size);
+        const [r, g, b] = hexToRgb(opts.color);
+        doc.setTextColor(r, g, b);
+        const wrapped = doc.splitTextToSize(text, contentWidth - indent);
+        for (const line of wrapped) {
+          ensureSpace(lineHeight);
+          doc.text(line, marginX + indent, y);
+          y += lineHeight;
+        }
+        if (opts.spaceAfter) y += opts.spaceAfter;
+      };
+
+      // Strip common inline markdown that we don't render with formatting
+      const stripInline = (s: string) =>
+        s
+          .replace(/\*\*(.+?)\*\*/g, '$1')
+          .replace(/__(.+?)__/g, '$1')
+          .replace(/(^|\s)\*(?!\s)(.+?)\*/g, '$1$2')
+          .replace(/(^|\s)_(?!\s)(.+?)_/g, '$1$2')
+          .replace(/`([^`]+)`/g, '$1')
+          .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+
+      const title =
+        guides.find(g => g.id === currentGuideId)?.title ||
+        `Style Guide - ${new Date().toLocaleDateString()}`;
+
+      // Cover title
+      writeBlock(title, {
+        size: 22,
+        font: 'times',
+        style: 'bold',
+        color: '#8B3A3A',
+        spaceAfter: 6,
+      });
+
+      const lines = currentGuide.split('\n');
+      let inCodeBlock = false;
+      for (const raw of lines) {
+        const line = raw.replace(/\s+$/, '');
+
+        // Fenced code blocks
+        if (/^```/.test(line)) {
+          inCodeBlock = !inCodeBlock;
+          y += 2;
+          continue;
+        }
+        if (inCodeBlock) {
+          writeBlock(line || ' ', {
+            size: 9,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#334155',
+            indent: 4,
+          });
+          continue;
+        }
+
+        if (!line.trim()) {
+          y += 3;
+          continue;
+        }
+
+        if (line.startsWith('### ')) {
+          writeBlock(stripInline(line.slice(4)), {
+            size: 13,
+            font: 'times',
+            style: 'bold',
+            color: '#1a1a1a',
+            spaceBefore: 4,
+            spaceAfter: 2,
+          });
+        } else if (line.startsWith('## ')) {
+          writeBlock(stripInline(line.slice(3)), {
+            size: 16,
+            font: 'times',
+            style: 'bold',
+            color: '#8B3A3A',
+            spaceBefore: 6,
+            spaceAfter: 3,
+          });
+        } else if (line.startsWith('# ')) {
+          writeBlock(stripInline(line.slice(2)), {
+            size: 19,
+            font: 'times',
+            style: 'bold',
+            color: '#8B3A3A',
+            spaceBefore: 8,
+            spaceAfter: 4,
+          });
+        } else if (/^[-*+]\s+/.test(line)) {
+          const content = stripInline(line.replace(/^[-*+]\s+/, ''));
+          writeBlock(`\u2022  ${content}`, {
+            size: 10.5,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#1e293b',
+            indent: 5,
+          });
+        } else if (/^\d+\.\s+/.test(line)) {
+          const match = line.match(/^(\d+)\.\s+(.*)$/);
+          const content = match ? stripInline(match[2]) : stripInline(line);
+          const prefix = match ? `${match[1]}.  ` : '';
+          writeBlock(`${prefix}${content}`, {
+            size: 10.5,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#1e293b',
+            indent: 5,
+          });
+        } else if (line.startsWith('> ')) {
+          writeBlock(stripInline(line.slice(2)), {
+            size: 10.5,
+            font: 'times',
+            style: 'italic',
+            color: '#475569',
+            indent: 6,
+          });
+        } else {
+          writeBlock(stripInline(line), {
+            size: 10.5,
+            font: 'helvetica',
+            style: 'normal',
+            color: '#1e293b',
+          });
+        }
+      }
+
+      // Page numbers
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(150, 150, 150);
+        doc.text(`${i} / ${pageCount}`, pageWidth - marginX, pageHeight - 8, { align: 'right' });
+      }
+
+      const filename =
+        title.replace(/[^a-z0-9]/gi, '_').toLowerCase().replace(/_+/g, '_').replace(/^_|_$/g, '') + '.pdf';
+      doc.save(filename);
+    } catch (err) {
+      console.error("Failed to export PDF:", err);
+      alert("Failed to export PDF. Please try again.");
+    }
   };
 
   const exportJSON = () => {
@@ -754,22 +1611,36 @@ export default function App() {
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
     setSelectedGuides(newSet);
+    setCombinationSuggestion(null);
   };
 
   const deleteGuide = (id: string) => {
     setGuides((prev) => prev.filter((g) => g.id !== id));
+    if (user) {
+      deleteDoc(doc(db, "users", user.uid, "style_guides", id)).catch(e => handleFirestoreError(e, OperationType.DELETE, "style_guides"));
+    }
     const newSet = new Set(selectedGuides);
     newSet.delete(id);
     setSelectedGuides(newSet);
   };
 
   useEffect(() => {
-    localStorage.setItem("st_custom_templates", JSON.stringify(customTemplates));
-  }, [customTemplates]);
+    if (customTemplatesLoaded) {
+      localforage.setItem("st_custom_templates", customTemplates).catch(e => console.error(e));
+    }
+  }, [customTemplates, customTemplatesLoaded]);
 
   useEffect(() => {
-    localStorage.setItem("st_saved_cards", JSON.stringify(savedCards));
-  }, [savedCards]);
+    if (savedCardsLoaded) {
+      localforage.setItem("st_saved_cards", savedCards).catch(e => console.error(e));
+    }
+  }, [savedCards, savedCardsLoaded]);
+
+  useEffect(() => {
+    if (savedDraftsLoaded) {
+      localforage.setItem("st_saved_drafts", savedDrafts).catch(e => console.error(e));
+    }
+  }, [savedDrafts, savedDraftsLoaded]);
 
   const lastExtractedRef = useRef<{ guide: string, template: string }>({ guide: "", template: "" });
 
@@ -859,6 +1730,45 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [view, forgeHistory]);
 
+  const handleGenerateScript = async () => {
+    if (!scriptPrompt.trim()) return;
+    
+    setIsGeneratingScript(true);
+    setScriptValidationError(null);
+    try {
+      const { currentProvider, currentModel } = getProviderAndModel("universe");
+      const result = await generateScript(
+        currentProvider,
+        apiKeys,
+        scriptPrompt,
+        currentModel
+      );
+      
+      // Basic validation using acorn
+      try {
+        const acorn = await import('acorn');
+        // Strip markdown code blocks if present
+        let codeToValidate = result;
+        if (codeToValidate.startsWith('```')) {
+          const lines = codeToValidate.split('\n');
+          if (lines[0].startsWith('```')) lines.shift();
+          if (lines[lines.length - 1].startsWith('```')) lines.pop();
+          codeToValidate = lines.join('\n');
+        }
+        acorn.parse(codeToValidate, { ecmaVersion: 'latest', sourceType: 'module' });
+      } catch (parseErr: any) {
+        setScriptValidationError(`Syntax Error: ${parseErr.message}`);
+      }
+
+      setGeneratedScript(result);
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate script: " + err.message);
+    } finally {
+      setIsGeneratingScript(false);
+    }
+  };
+
   const handleExtractUniverse = async () => {
     if (!universeSelectedGuide && universeSelectedCards.size === 0) return;
     
@@ -880,13 +1790,34 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (forgeError) {
+      setForgeError(null);
+    }
+  }, [forgeName, forgeConcept, forgeSelectedGuide]);
+
   const handleForgeCard = async () => {
-    if (!forgeName || !forgeConcept || !forgeSelectedGuide) return;
-    
+    setForgeError(null);
+    setForgeStreamText("");
+    const missingFields = [];
+    if (!forgeName.trim()) missingFields.push("Character Name");
+    if (!forgeConcept.trim()) missingFields.push("Core Concept / Archetype");
+    if (!forgeSelectedGuide) missingFields.push("Style Guide Base");
+
+    if (missingFields.length > 0) {
+      setForgeError(`Please fill in the following required fields: ${missingFields.join(", ")}`);
+      return;
+    }
+
     const guide = guides.find(g => g.id === forgeSelectedGuide);
-    if (!guide) return;
+    if (!guide) {
+      setForgeError("Selected Style Guide not found.");
+      return;
+    }
 
     setIsForging(true);
+    setLastForgeAction("forge");
+    setSuggestedSong(null);
     try {
       const allSlots = [
         { name: "Name", value: forgeName },
@@ -897,7 +1828,7 @@ export default function App() {
       const templateObj = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
       const template = templateObj?.content;
       const templateExample = templateObj?.example;
-      
+
       const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
       const result = await generateCharacterCard(
         currentProvider,
@@ -907,12 +1838,15 @@ export default function App() {
         template,
         currentModel,
         forgeFirstMessageIdea,
-        templateExample
+        templateExample,
+        (partial) => setForgeStreamText(partial)
       );
       setForgedCard(result);
-    } catch (err) {
+      setForgeStreamText("");
+    } catch (err: any) {
       console.error(err);
-      alert("Failed to forge card. Check console for details.");
+      setForgeError(err.message || String(err));
+      setForgeStreamText("");
     } finally {
       setIsForging(false);
     }
@@ -923,7 +1857,7 @@ export default function App() {
     setIsGeneratingImagePrompt(true);
     try {
       const { generateImagePrompt } = await import("./lib/api");
-      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_image_prompt");
       const details = JSON.stringify(forgedCard, null, 2);
       const prompt = await generateImagePrompt(currentProvider, apiKeys, details, currentModel);
       setImagePrompt(prompt);
@@ -935,32 +1869,204 @@ export default function App() {
     }
   };
 
-  const handleGenerateImage = async () => {
-    if (!imagePrompt) return;
-    setIsGeneratingImage(true);
+  const handleSuggestSong = async () => {
+    if (!forgedCard) return;
+    setIsSuggestingSong(true);
     try {
-      const { generateCharacterImage } = await import("./lib/api");
-      const { currentProvider, currentModel } = getProviderAndModel("forge_image");
-      
-      if (currentProvider !== "gemini") {
-        alert("Image generation is currently only supported with Gemini models.");
-        setIsGeneratingImage(false);
-        return;
-      }
-
-      // Default to gemini-3.1-flash-image-preview if no model is selected or if a text model is selected
-      let modelToUse = currentModel;
-      if (!modelToUse || !modelToUse.includes("image")) {
-        modelToUse = "gemini-3.1-flash-image-preview";
-      }
-
-      const imageBase64 = await generateCharacterImage(apiKeys, imagePrompt, modelToUse, imageAspectRatio, imageSize, imageStyle);
-      setCharacterImage(imageBase64);
+      const { suggestThemeSong } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const song = await suggestThemeSong(currentProvider, apiKeys, forgedCard, currentModel);
+      setSuggestedSong(song);
     } catch (err) {
       console.error(err);
-      alert("Failed to generate image. Please check your Gemini API key.");
+      alert("Failed to suggest theme song.");
     } finally {
-      setIsGeneratingImage(false);
+      setIsSuggestingSong(false);
+    }
+  };
+
+  const handleGenerateGreeting = async () => {
+    if (!forgedCard) return;
+    setIsGeneratingGreeting(true);
+    try {
+      const { generateAlternateGreeting } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const existingGreetings = forgedCard.alternate_greetings || [];
+      const forgeGuide = guides.find(g => g.id === forgeSelectedGuide);
+      const greeting = await generateAlternateGreeting(
+        currentProvider,
+        apiKeys,
+        forgedCard,
+        existingGreetings,
+        currentModel,
+        (partial) => setForgeStreamText(partial),
+        undefined,
+        forgeGuide?.content
+      );
+      setForgedCard({
+        ...forgedCard,
+        alternate_greetings: [...existingGreetings, greeting.trim()]
+      });
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate greeting: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsGeneratingGreeting(false);
+    }
+  };
+
+  const handleStudioCardUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const card = await parseFile(file);
+      setStudioUploadedCard(card);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
+    }
+    e.target.value = "";
+  };
+
+  const handleStudioGenerate = async () => {
+    const card = studioCardSource === "saved"
+      ? savedCards.find(c => c.id === studioSelectedCardId)?.card
+      : studioUploadedCard;
+    if (!card) {
+      alert(studioCardSource === "saved" ? "Please select a saved card first." : "Please upload a card first.");
+      return;
+    }
+    if (!studioVibePrompt.trim()) {
+      alert("Please describe what you want the new greeting to be about.");
+      return;
+    }
+    setIsStudioGenerating(true);
+    setStudioGeneratedGreeting("");
+    setForgeStreamText("");
+    try {
+      const { generateAlternateGreeting } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const guide = guides.find(g => g.id === studioSelectedGuide);
+      const greeting = await generateAlternateGreeting(
+        currentProvider,
+        apiKeys,
+        card,
+        card.alternate_greetings || [],
+        currentModel,
+        (partial) => { setForgeStreamText(partial); setStudioGeneratedGreeting(partial); },
+        studioVibePrompt,
+        guide?.content
+      );
+      setStudioGeneratedGreeting(greeting.trim());
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate greeting: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsStudioGenerating(false);
+    }
+  };
+
+  const handleStudioAppendToCard = () => {
+    if (!studioGeneratedGreeting.trim()) return;
+    const card = studioCardSource === "saved"
+      ? savedCards.find(c => c.id === studioSelectedCardId)?.card
+      : studioUploadedCard;
+    if (!card) return;
+    const updated: CharacterCard = {
+      ...card,
+      alternate_greetings: [...(card.alternate_greetings || []), studioGeneratedGreeting.trim()]
+    };
+    if (studioCardSource === "saved") {
+      setSavedCards(prev => prev.map(c => c.id === studioSelectedCardId ? { ...c, card: updated } : c));
+    } else {
+      setStudioUploadedCard(updated);
+    }
+    setStudioGeneratedGreeting("");
+    alert("Greeting added to card!");
+  };
+
+  const handleAdaptCard = async () => {
+    if (!adaptRawText.trim()) {
+      alert("Please paste your card text first.");
+      return;
+    }
+    if (!adaptSelectedGuide) {
+      alert("Please select a style guide to adapt the card to.");
+      return;
+    }
+    const guide = guides.find(g => g.id === adaptSelectedGuide);
+    if (!guide) {
+      alert("Selected style guide not found.");
+      return;
+    }
+    setIsAdapting(true);
+    setAdaptedCard(null);
+    setForgeStreamText("");
+    try {
+      const { adaptCardToStyleGuide } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const card = await adaptCardToStyleGuide(
+        currentProvider,
+        apiKeys,
+        adaptRawText,
+        guide.content,
+        currentModel,
+        (partial) => setForgeStreamText(partial)
+      );
+      setAdaptedCard(card);
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to adapt card: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsAdapting(false);
+    }
+  };
+
+  const handleLoadAdaptedCard = () => {
+    if (!adaptedCard) return;
+    setForgeName(adaptedCard.name || "");
+    setForgeConcept(adaptedCard.personality || "");
+    setForgeFirstMessageIdea(adaptedCard.first_mes || "");
+    setForgedCard(adaptedCard);
+    setForgeSelectedGuide(adaptSelectedGuide);
+    setForgeActiveTab("preview");
+  };
+
+  const handleAdaptGenerateGreeting = async () => {
+    if (!adaptedCard) return;
+    const guide = guides.find(g => g.id === adaptSelectedGuide);
+    setIsAdapting(true);
+    setForgeStreamText("");
+    try {
+      const { generateAlternateGreeting } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+      const greeting = await generateAlternateGreeting(
+        currentProvider,
+        apiKeys,
+        adaptedCard,
+        adaptedCard.alternate_greetings || [],
+        currentModel,
+        (partial) => setForgeStreamText(partial),
+        undefined,
+        guide?.content
+      );
+      setAdaptedCard({
+        ...adaptedCard,
+        alternate_greetings: [...(adaptedCard.alternate_greetings || []), greeting.trim()]
+      });
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      alert("Failed to generate greeting: " + (err.message || err));
+      setForgeStreamText("");
+    } finally {
+      setIsAdapting(false);
     }
   };
 
@@ -1021,7 +2127,15 @@ export default function App() {
         otherSlots,
         guide.content,
         currentModel,
-        templateExample
+        templateExample,
+        slotVibes[index],
+        (text) => {
+          setForgeSlots(prev => {
+            const newSlots = [...prev];
+            newSlots[index] = { ...newSlots[index], value: text };
+            return newSlots;
+          });
+        }
       );
       
       setForgeSlots(prev => {
@@ -1034,6 +2148,91 @@ export default function App() {
       alert(`Failed to generate slot content: ${err?.message || "Unknown error"}`);
     } finally {
       setGeneratingSlotIndex(null);
+    }
+  };
+
+  const handleRandomizeArchetype = () => {
+    const archetypes = [
+      "The Grumpy Bodyguard",
+      "A cynical detective with a heart of gold",
+      "Enemies to Lovers - Rival CEO",
+      "Cyberpunk Hacker with a secret",
+      "Vampire Lord who is tired of immortality",
+      "Sunshine Barista x Grumpy Regular",
+      "Rebellious Prince/Princess",
+      "Stoic Knight sworn to protect you",
+      "Chaotic Neutral Mage",
+      "Space Smuggler with a debt",
+      "Yandere Childhood Friend",
+      "Tsundere Class President",
+      "Overworked Demon Lord",
+      "Time Traveler trying to fix a mistake",
+      "Rogue AI discovering emotions"
+    ];
+    const random = archetypes[Math.floor(Math.random() * archetypes.length)];
+    setForgeConcept(random);
+  };
+
+  const estimateTokens = (text: string) => {
+    if (!text) return 0;
+    return Math.ceil(text.length / 4);
+  };
+
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    // Could add a toast here, but simple alert or silent is fine for now
+  };
+
+  const handleVibeForge = async () => {
+    if (!vibePrompt.trim()) {
+      alert("Please enter a vibe or description first.");
+      return;
+    }
+    if (!forgeSelectedGuide) {
+      alert("Please select a Style Guide first.");
+      return;
+    }
+    setIsVibeForging(true);
+    setLastForgeAction("vibe");
+    setForgeError(null);
+    setForgeStreamText("");
+    try {
+      const { vibeForgeCard } = await import("./lib/api");
+      const { currentProvider, currentModel } = getProviderAndModel("forge_vibe");
+      const template = [...DEFAULT_TEMPLATES, ...customTemplates].find(t => t.id === forgeSelectedTemplate);
+      const templateExample = template?.example;
+      const guide = guides.find(g => g.id === forgeSelectedGuide);
+
+      const result = await vibeForgeCard(
+        currentProvider,
+        apiKeys,
+        vibePrompt,
+        forgeSlots,
+        currentModel,
+        templateExample,
+        guide?.content,
+        (partial) => setForgeStreamText(partial)
+      );
+
+      setForgeName(result.name);
+      setForgeConcept(result.concept);
+      if (result.firstMessageIdea) {
+        setForgeFirstMessageIdea(result.firstMessageIdea);
+      }
+
+      setForgeSlots(prev => prev.map(slot => ({
+        ...slot,
+        value: result.slots[slot.name] || slot.value
+      })));
+
+      setForgeActiveTab("details");
+      setForgeStreamText("");
+    } catch (err: any) {
+      console.error(err);
+      setForgeError(err.message || String(err));
+      setForgeStreamText("");
+    } finally {
+      setIsVibeForging(false);
     }
   };
 
@@ -1050,7 +2249,7 @@ export default function App() {
       const templateExample = template?.example;
 
       const guide = guides.find(g => g.id === forgeSelectedGuide);
-      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel, templateExample, guide?.content);
+      const filledData = await autoFillSlots(currentProvider, apiKeys, forgeName, forgeConcept, forgeSlots, currentModel, templateExample, guide?.content, autoFillVibe);
       setForgeSlots(prev => prev.map(slot => {
         if (filledData[slot.name]) {
           return { ...slot, value: filledData[slot.name] };
@@ -1068,7 +2267,7 @@ export default function App() {
   const downloadForgedCard = () => {
     if (!forgedCard) return;
     
-    const cardData = {
+    const cardData: any = {
       spec: "chara_card_v2",
       spec_version: "2.0",
       data: {
@@ -1076,11 +2275,6 @@ export default function App() {
         extensions: {}
       }
     };
-
-    if (characterImage) {
-      // Add image to the card data if available
-      cardData.data.image = characterImage;
-    }
     
     const blob = new Blob([JSON.stringify(cardData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -1096,10 +2290,7 @@ export default function App() {
   const saveForgedCard = () => {
     if (!forgedCard) return;
     
-    const cardToSave = { ...forgedCard };
-    if (characterImage) {
-      cardToSave.image = characterImage;
-    }
+    const cardToSave: any = { ...forgedCard };
 
     const newSavedCard: SavedCard = {
       id: Date.now().toString(),
@@ -1112,6 +2303,44 @@ export default function App() {
     alert("Card saved to library!");
   };
 
+  const handleSaveDraft = async (section: string) => {
+    try {
+      if (section === 'forge') {
+        const newDraft: SavedDraft = {
+          id: Date.now().toString(),
+          name: forgeName || "Untitled Draft",
+          concept: forgeConcept,
+          slots: forgeSlots,
+          selectedGuide: forgeSelectedGuide,
+          selectedTemplate: forgeSelectedTemplate,
+          firstMessageIdea: forgeFirstMessageIdea,
+          date: new Date().toISOString(),
+        };
+        setSavedDrafts(prev => [...prev, newDraft]);
+      } else if (section === 'template') {
+        await localforage.setItem("st_template_draft", {
+          name: editingTemplateName,
+          content: editingTemplateContent,
+          example: editingTemplateExample
+        });
+      } else if (section === 'app') {
+        const existingState: any = await localforage.getItem("st_app_autosave_v1") || {};
+        await localforage.setItem("st_app_autosave_v1", {
+          ...existingState,
+          view,
+          currentGuide,
+          scriptPrompt,
+          imageAspectRatio,
+          imageStyle,
+        });
+      }
+      alert("Draft saved successfully!");
+    } catch (e) {
+      console.error("Failed to save draft", e);
+      alert("Failed to save draft.");
+    }
+  };
+
   const handleAddUniverseLink = (sourceId: string, targetId: string, type: "relationship" | "pipeline", label: string) => {
     if (!universeData) return;
     setUniverseData({
@@ -1121,43 +2350,75 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-screen w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
-      {/* Sidebar / Topbar */}
-      <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2] flex flex-col z-10 shrink-0">
-        <div className="p-4 md:p-8 flex justify-between items-center md:block">
-          <div className="flex justify-between items-start w-full">
+    <div className="flex flex-col md:flex-row h-[100dvh] w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
+      {/* Always-mounted file input, shared by Corpus Ingestion's Browse and Library's Import Guide */}
+      <input
+        type="file"
+        multiple
+        accept=".png,.json,.pdf,.docx"
+        className="hidden"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+      />
+      {/* Always-mounted file input for Fanfiction Distillery (PDF/DOCX/TXT) */}
+      <input
+        type="file"
+        multiple
+        accept=".pdf,.docx,.txt"
+        className="hidden"
+        ref={fanficInputRef}
+        onChange={handleFanficUpload}
+      />
+      {/* Sidebar for Desktop / Topbar for Mobile */}
+      <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2]/80 flex flex-col z-20 shrink-0 shadow-sm md:shadow-none">
+        <div className="p-3 md:p-8 flex justify-between items-center md:block">
+          <div className="flex justify-between items-center md:items-start w-full">
             <div>
-              <h1 className="text-2xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
+              <h1 className="text-xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
                 StyleForge
               </h1>
               <p className="hidden md:block text-xs font-medium tracking-widest uppercase text-slate-500 mt-2">
                 Authorial Voice Engine
               </p>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => setTheme(theme === "light" ? "dark" : "light")}
-              className="rounded-full md:mt-0"
-            >
-              {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={user ? handleLogout : handleLogin}
+                className="rounded-full md:mt-0 opacity-70 hover:opacity-100"
+                title={user ? "Sign Out" : "Sign In with Google"}
+              >
+                {loadingAuth ? <Loader2 className="h-5 w-5 animate-spin" /> : user ? <LogOut className="h-5 w-5" /> : <LogIn className="h-5 w-5" />}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+                className="rounded-full md:mt-0 opacity-70 hover:opacity-100"
+              >
+                {theme === "light" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
+              </Button>
+            </div>
           </div>
         </div>
         
-        <nav className="flex-row md:flex-col overflow-x-auto md:overflow-x-visible flex-none md:flex-1 px-2 md:px-4 pb-2 md:pb-0 gap-1 md:gap-0 md:space-y-1 flex no-scrollbar">
-          <NavButton view="upload" icon={Upload} label="Corpus Ingestion" currentView={view} setView={setView} />
-          <NavButton view="generate" icon={FileText} label="Current Guide" currentView={view} setView={setView} />
+        {/* Desktop Nav */}
+        <nav className="hidden md:flex flex-col flex-1 px-4 space-y-1 overflow-y-auto">
+          <NavButton view="upload" icon={Upload} label="Ingestion" currentView={view} setView={setView} />
+          <NavButton view="fanfiction" icon={Feather} label="Fanfiction" currentView={view} setView={setView} />
+          <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
           <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
-          <NavButton view="create" icon={Wand2} label="Card Forge" currentView={view} setView={setView} />
-          <NavButton view="universe" icon={Network} label="Universe Map" currentView={view} setView={setView} />
-          <NavButton view="settings" icon={Settings} label="Configuration" currentView={view} setView={setView} />
+          <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
+          <NavButton view="universe" icon={Network} label="Universe" currentView={view} setView={setView} />
+          <NavButton view="script" icon={FileJson} label="Script" currentView={view} setView={setView} />
+          <NavButton view="settings" icon={Settings} label="Settings" currentView={view} setView={setView} />
         </nav>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 flex flex-col overflow-hidden relative">
-        <ScrollArea className="flex-1 px-3 py-4 md:px-12 md:py-10">
+        <ScrollArea className="flex-1 px-4 py-6 md:px-12 md:py-10">
           <div className="max-w-5xl mx-auto">
             <AnimatePresence mode="wait">
               
@@ -1189,15 +2450,7 @@ export default function App() {
                     <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
                       Drag and drop PNG, JSON, PDF, or DOCX files here, or click to browse your computer.
                     </p>
-                    <input
-                      type="file"
-                      multiple
-                      accept=".png,.json,.pdf,.docx"
-                      className="hidden"
-                      ref={fileInputRef}
-                      onChange={handleFileUpload}
-                    />
-                    <Button 
+                    <Button
                       className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105" 
                       disabled={isParsing}
                       onClick={(e) => {
@@ -1222,7 +2475,7 @@ export default function App() {
                           <p className="text-sm text-slate-500 mt-1">{cards.length} cards loaded</p>
                         </div>
                         <div className="flex items-center gap-4">
-                          <ModelSelector
+                          <ConfiguredModelSelector apiKeys={apiKeys}
                             sectionId="ingestion"
                             globalProvider={provider}
                             globalModels={apiModels}
@@ -1307,6 +2560,125 @@ export default function App() {
                 </motion.div>
               )}
 
+              {/* FANFICTION VIEW */}
+              {view === "fanfiction" && (
+                <motion.div
+                  key="fanfiction"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6 md:space-y-8"
+                >
+                  <div className="space-y-2">
+                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Fanfiction Distillery</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light">
+                      Upload an author's fanfiction and distill their prose into a writing style guide. Just one or two works per author is enough to capture a faithful voice profile.
+                    </p>
+                  </div>
+
+                  <div
+                    className="border-dashed border-[1.5px] border-[#d1d0ce] bg-white/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:border-[#8B3A3A]/30 cursor-pointer"
+                    onClick={() => fanficInputRef.current?.click()}
+                  >
+                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+                      <Feather className="w-5 h-5 md:w-6 md:h-6 text-[#8B3A3A]" />
+                    </div>
+                    <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Upload Fanfiction</h3>
+                    <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
+                      Drag and drop PDF, DOCX, or TXT files here, or click to browse. One or two fics per author is plenty.
+                    </p>
+                    <Button
+                      className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105"
+                      disabled={isParsingFanfic}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fanficInputRef.current?.click();
+                      }}
+                    >
+                      {isParsingFanfic ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Plus className="w-5 h-5 mr-2" />}
+                      Browse Files
+                    </Button>
+                  </div>
+
+                  {fanfics.length > 0 && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="space-y-6"
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-[#e5e4e2] pb-4 gap-4">
+                        <div>
+                          <h3 className="text-2xl font-serif font-medium">Loaded Works</h3>
+                          <p className="text-sm text-slate-500 mt-1">{fanfics.length} {fanfics.length === 1 ? "work" : "works"} loaded</p>
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <ConfiguredModelSelector apiKeys={apiKeys}
+                            sectionId="fanfiction"
+                            globalProvider={provider}
+                            globalModels={apiModels}
+                            sectionConfigs={sectionConfigs}
+                            setSectionConfigs={setSectionConfigs}
+                            availableModels={availableModels}
+                            isFetchingModels={isFetchingModels}
+                          />
+                          <Button
+                            onClick={handleGenerateFromFanfiction}
+                            disabled={isGenerating || fanfics.length === 0}
+                            className="bg-slate-900 hover:bg-slate-800 text-white rounded-full px-6"
+                          >
+                            {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Feather className="w-4 h-4 mr-2" />}
+                            Distill Style Guide
+                          </Button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {fanfics.map((fic) => (
+                          <div key={fic.id} className="group relative bg-white border border-[#e5e4e2] rounded-2xl p-5 shadow-sm hover:shadow-md transition-all">
+                            <button
+                              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
+                              onClick={(e) => { e.stopPropagation(); removeFanfic(fic.id); }}
+                              title="Remove Work"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                            <div className="flex items-start gap-3 pr-8">
+                              <div className="w-10 h-10 rounded-xl bg-[#f0efe9] flex items-center justify-center flex-shrink-0">
+                                <Feather className="w-5 h-5 text-[#8B3A3A]" />
+                              </div>
+                              <div className="flex-1 min-w-0 space-y-2">
+                                <div>
+                                  <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Title</label>
+                                  <Input
+                                    value={fic.title}
+                                    onChange={(e) => updateFanfic(fic.id, "title", e.target.value)}
+                                    placeholder="Untitled"
+                                    className="h-8 text-sm border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="text-[10px] font-medium uppercase tracking-wider text-slate-400">Author</label>
+                                  <Input
+                                    value={fic.author}
+                                    onChange={(e) => updateFanfic(fic.id, "author", e.target.value)}
+                                    placeholder="Author name (optional)"
+                                    className="h-8 text-sm border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                                  />
+                                </div>
+                                <p className="text-xs text-slate-400 pt-1">
+                                  {fic.text.length.toLocaleString()} characters · ~{Math.max(1, Math.round(fic.text.length / 5 / 250)).toLocaleString()} pages
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+                </motion.div>
+              )}
+
               {/* GENERATE VIEW */}
               {view === "generate" && (
                 <motion.div
@@ -1361,6 +2733,10 @@ export default function App() {
                         )
                       ) : (
                         <>
+                          <Button variant="outline" onClick={() => handleSaveDraft('app')} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                            <Save className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
+                            Save Draft
+                          </Button>
                           <Button variant="outline" onClick={saveCurrentGuide} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
                             <Check className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             Save to Library
@@ -1407,7 +2783,9 @@ export default function App() {
                       <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
                       <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Synthesizing Authorial Voice...</h3>
                       <p className="text-slate-500 mt-2 max-w-md text-sm md:text-base">
-                        Analyzing prose patterns, dialogue registers, and thematic DNA across {cards.length} cards.
+                        {cards.length > 0
+                          ? `Analyzing prose patterns, dialogue registers, and thematic DNA across ${cards.length} cards.`
+                          : `Analyzing prose patterns, dialogue registers, and thematic DNA across ${fanfics.length} ${fanfics.length === 1 ? "work" : "works"} of fanfiction.`}
                       </p>
                     </div>
                   ) : currentGuide ? (
@@ -1463,7 +2841,7 @@ export default function App() {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2 md:gap-3">
-                      <ModelSelector
+                      <ConfiguredModelSelector apiKeys={apiKeys}
                         sectionId="library"
                         globalProvider={provider}
                         globalModels={apiModels}
@@ -1480,8 +2858,18 @@ export default function App() {
                         <Upload className="w-4 h-4 mr-2" />
                         Import Guide
                       </Button>
-                      <Button 
-                        onClick={handleMerge} 
+                      <Button
+                        onClick={handleSuggestCombination}
+                        disabled={selectedGuides.size !== 2 || isSuggestingCombination}
+                        variant="outline"
+                        className="rounded-full border-[#8B3A3A]/30 text-[#8B3A3A] hover:bg-[#8B3A3A]/5 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                        title="Pick one fanfiction guide and one card guide to see if their styles can combine"
+                      >
+                        {isSuggestingCombination ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                        Suggest Combination
+                      </Button>
+                      <Button
+                        onClick={handleMerge}
                         disabled={selectedGuides.size < 2 || isGenerating}
                         className="rounded-full bg-slate-900 text-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                       >
@@ -1490,6 +2878,68 @@ export default function App() {
                       </Button>
                     </div>
                   </div>
+
+                  {(isSuggestingCombination || combinationSuggestion) && (
+                    <div className="bg-white border border-[#8B3A3A]/20 rounded-2xl p-5 md:p-7 shadow-sm">
+                      {isSuggestingCombination ? (
+                        <div className="flex items-center gap-3 text-slate-600">
+                          <Loader2 className="w-5 h-5 animate-spin text-[#8B3A3A]" />
+                          <span className="text-sm md:text-base">Analyzing whether these two styles can be combined...</span>
+                        </div>
+                      ) : combinationSuggestion ? (
+                        <div className="space-y-4">
+                          <div className="flex items-start justify-between gap-4">
+                            <div className="flex items-center gap-3">
+                              <Wand2 className="w-5 h-5 text-[#8B3A3A]" />
+                              <h3 className="text-lg md:text-xl font-serif font-medium text-slate-900">Combination Analysis</h3>
+                              <span className={cn(
+                                "text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full",
+                                combinationSuggestion.compatibility === "high" ? "bg-emerald-100 text-emerald-700" :
+                                combinationSuggestion.compatibility === "medium" ? "bg-amber-100 text-amber-700" :
+                                "bg-red-100 text-red-700"
+                              )}>
+                                {combinationSuggestion.compatibility} compatibility
+                              </span>
+                            </div>
+                            <button
+                              onClick={() => setCombinationSuggestion(null)}
+                              className="w-7 h-7 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-700 flex items-center justify-center transition-colors flex-shrink-0"
+                              title="Dismiss"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <p className="text-slate-900 font-medium text-sm md:text-base">{combinationSuggestion.verdict}</p>
+                          {combinationSuggestion.rationale && (
+                            <p className="text-slate-600 text-sm leading-relaxed">{combinationSuggestion.rationale}</p>
+                          )}
+                          {combinationSuggestion.recommendations.length > 0 && (
+                            <div>
+                              <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">How to combine</p>
+                              <ul className="space-y-1.5">
+                                {combinationSuggestion.recommendations.map((rec, i) => (
+                                  <li key={i} className="flex gap-2 text-sm text-slate-700">
+                                    <Check className="w-4 h-4 text-[#8B3A3A] flex-shrink-0 mt-0.5" />
+                                    <span>{rec}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                          <div className="pt-2">
+                            <Button
+                              onClick={() => { setCombinationSuggestion(null); handleMerge(); }}
+                              disabled={selectedGuides.size !== 2 || isGenerating}
+                              className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white text-sm px-5"
+                            >
+                              {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Merge className="w-4 h-4 mr-2" />}
+                              Create Combined Guide
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  )}
 
                   {guides.length === 0 ? (
                     <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
@@ -1521,7 +2971,16 @@ export default function App() {
                                 {selectedGuides.has(guide.id) && <Check className="w-3 h-3 text-white" />}
                               </div>
                               <div>
-                                <h3 className="font-serif font-medium text-xl text-slate-900">{guide.title}</h3>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <h3 className="font-serif font-medium text-xl text-slate-900">{guide.title}</h3>
+                                  <span className={cn(
+                                    "inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full",
+                                    guide.source === "fanfic" ? "bg-[#8B3A3A]/10 text-[#8B3A3A]" : "bg-slate-100 text-slate-500"
+                                  )}>
+                                    {guide.source === "fanfic" && <Feather className="w-3 h-3" />}
+                                    {guide.source === "fanfic" ? "Fanfic" : "Card"}
+                                  </span>
+                                </div>
                                 <p className="text-xs text-slate-500 font-medium tracking-wide uppercase mt-1">
                                   {new Date(guide.date).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}
                                 </p>
@@ -1545,6 +3004,7 @@ export default function App() {
                                 e.stopPropagation();
                                 setCurrentGuide(guide.content);
                                 setCurrentGuideId(guide.id);
+                                setCurrentGuideSource(guide.source || "card");
                                 setIsEditingGuide(false);
                                 setShowVersions(false);
                                 setView("generate");
@@ -1577,33 +3037,109 @@ export default function App() {
                         Generate a new character card using a saved style guide.
                       </p>
                     </div>
-                    <Button 
-                      onClick={() => setShowSavedCards(!showSavedCards)}
-                      variant="outline"
-                      className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
-                    >
-                      <BookOpen className="w-4 h-4 mr-2" />
-                      {showSavedCards ? "Back to Forge" : "Saved Cards"}
-                    </Button>
+                    <div className="flex gap-2">
+                      {!showSavedCards && (
+                        <Button 
+                          onClick={() => handleSaveDraft('forge')}
+                          variant="outline"
+                          className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          Save Draft
+                        </Button>
+                      )}
+                      <Button 
+                        onClick={() => setShowSavedCards(!showSavedCards)}
+                        variant="outline"
+                        className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                      >
+                        <BookOpen className="w-4 h-4 mr-2" />
+                        {showSavedCards ? "Back to Forge" : "Saved Cards"}
+                      </Button>
+                    </div>
                   </div>
 
                   {showSavedCards ? (
                     <div className="space-y-6">
-                      {savedCards.length === 0 ? (
+                      {savedDrafts.length > 0 && (
+                        <>
+                          <h3 className="text-lg font-serif text-slate-700">Drafts</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {savedDrafts.map(draft => (
+                              <div key={draft.id} className="bg-amber-50/50 border border-amber-200 rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group cursor-pointer" onClick={() => {
+                                    setForgeName(draft.name);
+                                    setForgeConcept(draft.concept);
+                                    setForgeSlots(draft.slots);
+                                    if (draft.selectedGuide) setForgeSelectedGuide(draft.selectedGuide);
+                                    if (draft.selectedTemplate) setForgeSelectedTemplate(draft.selectedTemplate);
+                                    if (draft.firstMessageIdea) setForgeFirstMessageIdea(draft.firstMessageIdea);
+                                    setForgedCard(null);
+                                    setShowSavedCards(false);
+                                  }}>
+                                <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (confirm("Delete this draft?")) {
+                                        setSavedDrafts(prev => prev.filter(d => d.id !== draft.id));
+                                        if (user) {
+                                          deleteDoc(doc(db, "users", user.uid, "character_drafts", draft.id)).catch(err => handleFirestoreError(err, OperationType.DELETE, "character_drafts"));
+                                        }
+                                      }
+                                    }}
+                                    className="h-8 w-8 rounded-full border-amber-200 hover:bg-red-50 hover:text-red-600 text-slate-700"
+                                    title="Delete Draft"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                                <div className="flex items-center gap-2 mb-1">
+                                  <h3 className="font-serif text-xl font-medium text-slate-900">{draft.name}</h3>
+                                  <span className="text-xs bg-amber-200 text-amber-800 px-2 py-0.5 rounded-full font-medium">Draft</span>
+                                </div>
+                                <p className="text-sm text-slate-500 mb-4">{draft.concept || "No concept yet"}</p>
+                                <div className="text-xs text-slate-400">
+                                  Saved on {new Date(draft.date).toLocaleDateString()}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                      {savedCards.length === 0 && savedDrafts.length === 0 ? (
                         <div className="text-center py-16 bg-white rounded-3xl border border-[#e5e4e2] shadow-sm">
                           <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                           <h3 className="text-xl font-serif text-slate-900 mb-2">No Saved Cards</h3>
                           <p className="text-slate-500">Cards you forge and save will appear here.</p>
                         </div>
-                      ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      ) : savedCards.length > 0 ? (
+                        <>
+                          {savedDrafts.length > 0 && <h3 className="text-lg font-serif text-slate-700">Forged Cards</h3>}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           {savedCards.map(saved => (
-                            <div key={saved.id} className="bg-white border border-[#e5e4e2] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group">
+                            <div key={saved.id} className="bg-white border border-[#e5e4e2] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group cursor-pointer" onClick={() => {
+                                    setForgeName(saved.name);
+                                    setForgeConcept(saved.concept);
+                                    setForgedCard(saved.card);
+                                    setShowSavedCards(false);
+                                  }}>
                               <div className="absolute top-4 right-4 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                                 <Button
                                   variant="outline"
                                   size="icon"
-                                  onClick={() => {
+                                  onClick={(e) => { e.stopPropagation(); exportCardJson(saved.card); }}
+                                  className="h-8 w-8 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700"
+                                  title="Download Card"
+                                >
+                                  <Download className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     setForgeName(saved.name);
                                     setForgeConcept(saved.concept);
                                     setForgedCard(saved.card);
@@ -1617,9 +3153,13 @@ export default function App() {
                                 <Button
                                   variant="outline"
                                   size="icon"
-                                  onClick={() => {
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     if (confirm("Are you sure you want to delete this saved card?")) {
                                       setSavedCards(prev => prev.filter(c => c.id !== saved.id));
+                                      if (user) {
+                                        deleteDoc(doc(db, "users", user.uid, "saved_cards", saved.id)).catch(err => handleFirestoreError(err, OperationType.DELETE, "saved_cards"));
+                                      }
                                     }
                                   }}
                                   className="h-8 w-8 rounded-full border-[#e5e4e2] hover:bg-red-50 hover:text-red-600 text-slate-700"
@@ -1636,25 +3176,90 @@ export default function App() {
                             </div>
                           ))}
                         </div>
-                      )}
+                        </>
+                      ) : null}
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 md:gap-8">
-                    {/* Input Form */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                    <Tabs value={forgeActiveTab} onValueChange={setForgeActiveTab} className="w-full">
+                      <TabsList className="flex flex-col sm:grid w-full sm:grid-cols-5 mb-6 h-auto sm:h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 gap-1 sm:gap-0">
+                        <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Character Details</TabsTrigger>
+                        <TabsTrigger value="vibe" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Vibe Forge</TabsTrigger>
+                        <TabsTrigger value="greeting-studio" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Greeting Studio</TabsTrigger>
+                        <TabsTrigger value="adapt" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Adapt Card</TabsTrigger>
+                        <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Output Preview</TabsTrigger>
+                      </TabsList>
+
+                      <TabsContent value="vibe" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500/20 via-purple-500 to-purple-500/20"></div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Vibe Forge</h3>
+                          </div>
+                          
+                          <div className="bg-purple-50 border border-purple-200 rounded-xl p-6 mb-6">
+                            <h4 className="text-lg font-medium text-purple-900 mb-2">Vibe Coding for Characters</h4>
+                            <p className="text-purple-700 text-sm">
+                              Describe your character in a few sentences. The AI will use your Style Guide and Template to automatically construct the entire character card based on your vibe.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="vibePrompt" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Character Vibe / Description <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <Textarea 
+                              id="vibePrompt"
+                              placeholder="e.g., A grumpy old wizard who secretly loves cats and baking pastries. He's very cynical but has a soft spot for the user..." 
+                              value={vibePrompt}
+                              onChange={(e) => setVibePrompt(e.target.value)}
+                              className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-purple-500/50 focus-visible:border-purple-500 transition-all min-h-[150px] resize-y"
+                            />
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row sm:justify-end pt-4 gap-4 sm:items-center">
+                            <div className="w-full sm:w-auto flex justify-start sm:justify-end">
+                              <ConfiguredModelSelector apiKeys={apiKeys}
+                                sectionId="forge_vibe"
+                                globalProvider={provider}
+                                globalModels={apiModels}
+                                sectionConfigs={sectionConfigs}
+                                setSectionConfigs={setSectionConfigs}
+                                availableModels={availableModels}
+                                isFetchingModels={isFetchingModels}
+                              />
+                            </div>
+                            {isVibeForging && forgeStreamText && (
+                              <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-xs text-purple-500 font-mono max-h-24 overflow-y-auto">
+                                Streaming... ({forgeStreamText.length} chars received)
+                              </div>
+                            )}
+                            <Button
+                              onClick={handleVibeForge}
+                              disabled={isVibeForging || !vibePrompt.trim() || !forgeSelectedGuide}
+                              className="w-full sm:w-auto h-12 px-8 rounded-xl bg-purple-600 hover:bg-purple-700 text-white shadow-md shadow-purple-600/20 transition-all text-base font-medium"
+                            >
+                              {isVibeForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
+                              {isVibeForging ? "Forging..." : "Forge from Vibe"}
+                            </Button>
+                          </div>
+                        </div>
+                      </TabsContent>
+
+                      <TabsContent value="details" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#8B3A3A]/20 via-[#8B3A3A] to-[#8B3A3A]/20"></div>
-                      <div className="flex items-center justify-between mb-4 gap-2">
-                        <h3 className="font-serif font-medium text-xl md:text-3xl text-slate-900 tracking-tight shrink-0">Character Details</h3>
-                        <div className="flex items-center gap-1.5 sm:gap-2">
+                      <div className="flex items-center justify-between mb-4">
+                        <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Character Details</h3>
+                        <div className="flex items-center gap-2">
                           <Button
                             variant="outline"
                             size="sm"
                             onClick={() => document.getElementById('forge-card-upload')?.click()}
-                            className="h-8 px-2 sm:px-3 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors text-xs"
+                            className="h-8 px-3 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
                             title="Upload an existing character card"
                           >
-                            <Upload className="w-4 h-4 sm:mr-1" />
-                            <span className="hidden sm:inline">Upload Card</span>
+                            <Upload className="w-4 h-4 mr-1" />
+                            Upload Card
                           </Button>
                           <input
                             type="file"
@@ -1705,9 +3310,7 @@ export default function App() {
                           className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
                         >
                           <option value="" disabled>Select a saved guide...</option>
-                          {guides.map((g) => (
-                            <option key={g.id} value={g.id}>{g.title}</option>
-                          ))}
+                          <GuideOptions guides={guides} />
                         </select>
                         {guides.length === 0 && (
                           <p className="text-xs text-amber-600 mt-1">You need to save a style guide in the Library first.</p>
@@ -1740,6 +3343,24 @@ export default function App() {
                               </optgroup>
                             )}
                           </select>
+                          {forgeSelectedTemplate && (
+                            <Button
+                              variant="outline"
+                              className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                              onClick={() => openTemplateEditor(forgeSelectedTemplate)}
+                              title={forgeSelectedTemplate.startsWith('custom-') ? "Edit Template" : "Edit as Custom Template"}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            onClick={() => openTemplateEditor()}
+                            title="Create New Template"
+                          >
+                            <Plus className="w-4 h-4" />
+                          </Button>
                           <Button
                             variant="outline"
                             className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
@@ -1748,6 +3369,16 @@ export default function App() {
                           >
                             <Upload className="w-4 h-4" />
                           </Button>
+                          {forgeSelectedTemplate?.startsWith('custom-') && (
+                            <Button
+                              variant="outline"
+                              className="h-11 px-3 border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 transition-colors"
+                              onClick={() => deleteCustomTemplate(forgeSelectedTemplate)}
+                              title="Delete Custom Template"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          )}
                           <input
                             type="file"
                             id="template-upload"
@@ -1789,6 +3420,15 @@ export default function App() {
                             />
                             <Button
                               variant="outline"
+                              size="icon"
+                              onClick={handleRandomizeArchetype}
+                              className="h-11 w-11 rounded-xl border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-500 transition-colors shrink-0"
+                              title="Randomize Archetype"
+                            >
+                              <Dices className="w-5 h-5" />
+                            </Button>
+                            <Button
+                              variant="outline"
                               onClick={handleSuggestArchetype}
                               disabled={isSuggestingArchetype || forgeSlots.length === 0}
                               className="h-11 text-[#8B3A3A] border-[#e5e4e2] hover:bg-[#8B3A3A]/10 px-4"
@@ -1798,7 +3438,7 @@ export default function App() {
                             </Button>
                           </div>
                           <div className="flex justify-end">
-                            <ModelSelector
+                            <ConfiguredModelSelector apiKeys={apiKeys}
                               sectionId="forge_suggest"
                               globalProvider={provider}
                               globalModels={apiModels}
@@ -1811,31 +3451,55 @@ export default function App() {
                         </div>
                       </div>
 
+                      {!forgeSelectedGuide && !forgeSelectedTemplate && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-6 text-center mt-6">
+                          <Info className="w-8 h-8 text-blue-500 mx-auto mb-3" />
+                          <h4 className="text-lg font-medium text-blue-900 mb-2">Ready to Forge?</h4>
+                          <p className="text-blue-700 text-sm max-w-md mx-auto">
+                            To get started, please select a <strong>Style Guide</strong> to define the author's voice, and a <strong>Template</strong> to determine the structure of your character card.
+                          </p>
+                        </div>
+                      )}
+
                       {forgeSlots.length > 0 && (
-                        <div className="flex flex-col gap-2 pt-4 pb-2 border-b border-[#e5e4e2] mb-4">
-                          <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-4 pt-4 pb-4 border-b border-[#e5e4e2] mb-4">
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                             <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Character Details</h3>
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              onClick={handleAutoFill}
-                              disabled={isAutoFilling || isExtractingSlots || !forgeName || !forgeConcept}
-                              className="h-8 text-xs text-[#8B3A3A] border-[#8B3A3A]/30 hover:bg-[#8B3A3A]/10"
-                            >
-                              {isAutoFilling ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
-                              Auto-Fill Empty Fields
-                            </Button>
+                            <div className="flex justify-start sm:justify-end">
+                              <ConfiguredModelSelector apiKeys={apiKeys}
+                                sectionId="forge_autofill"
+                                globalProvider={provider}
+                                globalModels={apiModels}
+                                sectionConfigs={sectionConfigs}
+                                setSectionConfigs={setSectionConfigs}
+                                availableModels={availableModels}
+                                isFetchingModels={isFetchingModels}
+                              />
+                            </div>
                           </div>
-                          <div className="flex justify-end">
-                            <ModelSelector
-                              sectionId="forge_autofill"
-                              globalProvider={provider}
-                              globalModels={apiModels}
-                              sectionConfigs={sectionConfigs}
-                              setSectionConfigs={setSectionConfigs}
-                              availableModels={availableModels}
-                              isFetchingModels={isFetchingModels}
+                          <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3">
+                            <Label className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center">
+                              Auto-Fill Vibe / Instructions <span className="text-slate-400 font-normal ml-2 normal-case">(Optional)</span>
+                              <InfoTooltip text="Provide specific instructions or a 'vibe' for the AI to follow when auto-filling the remaining empty fields." />
+                            </Label>
+                            <Textarea
+                              placeholder="e.g., Make the personality traits focus on their dark past, and make the appearance very gothic..."
+                              value={autoFillVibe}
+                              onChange={(e) => setAutoFillVibe(e.target.value)}
+                              className="h-20 text-sm bg-white rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A]"
                             />
+                            <div className="flex justify-end">
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={handleAutoFill}
+                                disabled={isAutoFilling || isExtractingSlots || !forgeName || !forgeConcept}
+                                className="h-9 px-4 text-xs text-[#8B3A3A] border-[#8B3A3A]/30 hover:bg-[#8B3A3A]/10 rounded-lg"
+                              >
+                                {isAutoFilling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                                Auto-Fill Empty Fields
+                              </Button>
+                            </div>
                           </div>
                         </div>
                       )}
@@ -1848,22 +3512,30 @@ export default function App() {
                       ) : (
                         forgeSlots.map((slot, index) => (
                           <div key={index} className="space-y-2">
-                            <div className="flex items-center justify-between">
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-0">
                               <Label htmlFor={`slot-${index}`} className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
                                 {slot.name}
                                 <InfoTooltip text={slot.description} />
                               </Label>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleGenerateSlot(index)}
-                                disabled={generatingSlotIndex === index || !forgeSelectedGuide}
-                                className="h-6 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-2"
-                                title={!forgeSelectedGuide ? "Select a style guide first" : "Auto-generate content for this field"}
-                              >
-                                {generatingSlotIndex === index ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
-                                Auto
-                              </Button>
+                              <div className="flex items-center gap-2 w-full sm:w-auto">
+                                <Input 
+                                  placeholder={`Vibe for ${slot.name}...`}
+                                  value={slotVibes[index] || ""}
+                                  onChange={(e) => setSlotVibes(prev => ({ ...prev, [index]: e.target.value }))}
+                                  className="h-8 text-xs bg-slate-50 border-slate-200 w-full sm:w-48 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A]"
+                                />
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleGenerateSlot(index)}
+                                  disabled={generatingSlotIndex === index || !forgeSelectedGuide}
+                                  className="h-8 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-3 shrink-0"
+                                  title={!forgeSelectedGuide ? "Select a style guide first" : "Auto-generate content for this field"}
+                                >
+                                  {generatingSlotIndex === index ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
+                                  Auto
+                                </Button>
+                              </div>
                             </div>
                             <Textarea 
                               id={`slot-${index}`}
@@ -1898,7 +3570,7 @@ export default function App() {
 
                       <div className="flex flex-col gap-2 mt-4">
                         <div className="flex justify-end">
-                          <ModelSelector
+                          <ConfiguredModelSelector apiKeys={apiKeys}
                             sectionId="forge_generate"
                             globalProvider={provider}
                             globalModels={apiModels}
@@ -1908,65 +3580,376 @@ export default function App() {
                             isFetchingModels={isFetchingModels}
                           />
                         </div>
-                        <Button 
-                          onClick={handleForgeCard} 
-                          disabled={isForging || !forgeName || !forgeConcept || !forgeSelectedGuide} 
+                        {forgeError && (
+                          <div className="p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl text-sm flex items-center justify-between gap-3">
+                            <span>{forgeError}</span>
+                            {lastForgeAction && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => lastForgeAction === "forge" ? handleForgeCard() : handleVibeForge()}
+                                className="shrink-0 border-red-300 hover:bg-red-100 text-red-700"
+                              >
+                                <RefreshCw className="w-4 h-4 mr-1" />
+                                Retry
+                              </Button>
+                            )}
+                          </div>
+                        )}
+                        {isForging && forgeStreamText && (
+                          <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 font-mono max-h-24 overflow-y-auto">
+                            Streaming... ({forgeStreamText.length} chars received)
+                          </div>
+                        )}
+                        <Button
+                          onClick={handleForgeCard}
+                          disabled={isForging}
                           className="w-full rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white py-6 text-lg shadow-md shadow-[#8B3A3A]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                         >
                           {isForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
-                          Forge Character
+                          {isForging ? "Forging..." : "Forge Character"}
                         </Button>
                       </div>
                     </div>
+                      </TabsContent>
 
-                    {/* Output Preview */}
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
-                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-3">
-                        <h3 className="font-serif font-medium text-xl md:text-3xl text-slate-900 tracking-tight">Forged Output</h3>
-                        {forgedCard && (
-                          <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                            <div className="flex items-center gap-1 mr-2">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={forgedCardHistory.undo}
-                                disabled={!forgedCardHistory.canUndo}
-                                className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
-                                title="Undo Generated Card"
-                              >
-                                <Undo2 className="w-4 h-4" />
-                              </Button>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                onClick={forgedCardHistory.redo}
-                                disabled={!forgedCardHistory.canRedo}
-                                className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
-                                title="Redo Generated Card"
-                              >
-                                <Redo2 className="w-4 h-4" />
-                              </Button>
-                            </div>
+                      {/* Greeting Studio — vibe-style greeting generation for saved or uploaded cards */}
+                      <TabsContent value="greeting-studio" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500/20 via-emerald-500 to-emerald-500/20"></div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Greeting Studio</h3>
+                          </div>
+
+                          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-6 mb-6">
+                            <h4 className="text-lg font-medium text-emerald-900 mb-2">Vibe-style Greeting Generation</h4>
+                            <p className="text-emerald-700 text-sm">
+                              Pick a saved card or upload one, describe the scenario/mood you want, and the AI will write a fresh greeting in the character's voice. Saved cards can use an associated style guide.
+                            </p>
+                          </div>
+
+                          <div className="flex gap-2">
                             <Button
-                              onClick={saveForgedCard}
-                              variant="outline"
-                              size="sm"
-                              className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors text-xs sm:text-sm"
+                              variant={studioCardSource === "saved" ? "default" : "outline"}
+                              onClick={() => setStudioCardSource("saved")}
+                              className={studioCardSource === "saved" ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
                             >
-                              <Save className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-                              <span className="hidden sm:inline">Save to Library</span>
-                              <span className="sm:hidden">Save</span>
+                              <BookOpen className="w-4 h-4 mr-2" />
+                              Saved Card
                             </Button>
                             <Button
+                              variant={studioCardSource === "upload" ? "default" : "outline"}
+                              onClick={() => setStudioCardSource("upload")}
+                              className={studioCardSource === "upload" ? "bg-emerald-600 hover:bg-emerald-700 text-white" : ""}
+                            >
+                              <Upload className="w-4 h-4 mr-2" />
+                              Upload Card
+                            </Button>
+                          </div>
+
+                          {studioCardSource === "saved" ? (
+                            <div className="space-y-2">
+                              <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                                Select Saved Card <span className="text-red-500 ml-1">*</span>
+                              </Label>
+                              <select
+                                value={studioSelectedCardId}
+                                onChange={(e) => setStudioSelectedCardId(e.target.value)}
+                                className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
+                              >
+                                <option value="" disabled>Pick a saved card...</option>
+                                {savedCards.map((c) => (
+                                  <option key={c.id} value={c.id}>{c.name}</option>
+                                ))}
+                              </select>
+                              {savedCards.length === 0 && (
+                                <p className="text-xs text-amber-600 mt-1">No saved cards yet. Forge and save a card first.</p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                                Upload Card File <span className="text-red-500 ml-1">*</span>
+                              </Label>
+                              <Input
+                                type="file"
+                                accept=".json,.png"
+                                onChange={handleStudioCardUpload}
+                                className="rounded-xl bg-[#f9f8f6] hover:bg-white border-[#e5e4e2]"
+                              />
+                              {studioUploadedCard && (
+                                <p className="text-xs text-slate-600 mt-1">Loaded: <span className="font-semibold">{studioUploadedCard.name || "Unnamed Card"}</span></p>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Style Guide <span className="text-slate-400 font-normal ml-2 text-xs normal-case tracking-normal">(Optional)</span>
+                            </Label>
+                            <select
+                              value={studioSelectedGuide}
+                              onChange={(e) => setStudioSelectedGuide(e.target.value)}
+                              className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
+                            >
+                              <option value="">No style guide (use card's natural voice)</option>
+                              <GuideOptions guides={guides} />
+                            </select>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="studioVibe" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Describe the Greeting You Want <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <Textarea
+                              id="studioVibe"
+                              placeholder="e.g., The character returns home after a long journey and finds the user waiting in the kitchen, making tea. They're emotional but trying to hide it..."
+                              value={studioVibePrompt}
+                              onChange={(e) => setStudioVibePrompt(e.target.value)}
+                              className="bg-[#f9f8f6] hover:bg-white focus:bg-white border-[#e5e4e2] rounded-xl min-h-[100px]"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <ConfiguredModelSelector apiKeys={apiKeys}
+                              sectionId="forge_generate"
+                              globalProvider={provider}
+                              globalModels={apiModels}
+                              sectionConfigs={sectionConfigs}
+                              setSectionConfigs={setSectionConfigs}
+                              availableModels={availableModels}
+                              isFetchingModels={isFetchingModels}
+                            />
+                          </div>
+
+                          {isStudioGenerating && forgeStreamText && (
+                            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-600 font-mono max-h-24 overflow-y-auto">
+                              Streaming... ({forgeStreamText.length} chars received)
+                            </div>
+                          )}
+
+                          <Button
+                            onClick={handleStudioGenerate}
+                            disabled={isStudioGenerating}
+                            className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white py-6 text-lg shadow-md shadow-emerald-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                          >
+                            {isStudioGenerating ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
+                            {isStudioGenerating ? "Generating..." : "Generate Greeting"}
+                          </Button>
+
+                          {studioGeneratedGreeting && !isStudioGenerating && (
+                            <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-bold tracking-widest text-emerald-700 uppercase">Generated Greeting</h4>
+                                <div className="flex items-center gap-2">
+                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-emerald-600" onClick={() => copyToClipboard(studioGeneratedGreeting)}>
+                                    <Copy className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <Textarea
+                                value={studioGeneratedGreeting}
+                                onChange={(e) => setStudioGeneratedGreeting(e.target.value)}
+                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px]"
+                              />
+                              <Button
+                                onClick={handleStudioAppendToCard}
+                                className="w-full rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white"
+                              >
+                                <Plus className="w-4 h-4 mr-2" />
+                                Add to Card's Alternate Greetings
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      {/* Adapt Card — paste off-platform card text and rewrite to style guide */}
+                      <TabsContent value="adapt" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500/20 via-cyan-500 to-cyan-500/20"></div>
+                          <div className="flex items-center justify-between mb-4">
+                            <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Adapt Card</h3>
+                          </div>
+
+                          <div className="bg-cyan-50 border border-cyan-200 rounded-xl p-6 mb-6">
+                            <h4 className="text-lg font-medium text-cyan-900 mb-2">Import & Rewrite to a Style</h4>
+                            <p className="text-cyan-700 text-sm">
+                              Paste raw character card text you started off-platform (any format — JSON, bracketed, W++, plain text). Pick a style guide, and the AI will rewrite every prose field to match — preserving the character's identity but transforming the voice.
+                            </p>
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label htmlFor="adaptRaw" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Paste Card Text <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <Textarea
+                              id="adaptRaw"
+                              placeholder="Paste your character card here — JSON, bracketed format, W++, or plain text all work..."
+                              value={adaptRawText}
+                              onChange={(e) => setAdaptRawText(e.target.value)}
+                              className="bg-[#f9f8f6] hover:bg-white focus:bg-white border-[#e5e4e2] rounded-xl min-h-[200px] font-mono text-sm"
+                            />
+                          </div>
+
+                          <div className="space-y-2">
+                            <Label className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
+                              Style Guide to Adapt To <span className="text-red-500 ml-1">*</span>
+                            </Label>
+                            <select
+                              value={adaptSelectedGuide}
+                              onChange={(e) => setAdaptSelectedGuide(e.target.value)}
+                              className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/50 focus-visible:border-cyan-600 transition-all"
+                            >
+                              <option value="" disabled>Pick a style guide...</option>
+                              <GuideOptions guides={guides} />
+                            </select>
+                            {guides.length === 0 && (
+                              <p className="text-xs text-amber-600 mt-1">You need to save a style guide in the Library first.</p>
+                            )}
+                          </div>
+
+                          <div className="space-y-2">
+                            <ConfiguredModelSelector apiKeys={apiKeys}
+                              sectionId="forge_generate"
+                              globalProvider={provider}
+                              globalModels={apiModels}
+                              sectionConfigs={sectionConfigs}
+                              setSectionConfigs={setSectionConfigs}
+                              availableModels={availableModels}
+                              isFetchingModels={isFetchingModels}
+                            />
+                          </div>
+
+                          {isAdapting && forgeStreamText && (
+                            <div className="p-3 bg-cyan-50 border border-cyan-200 rounded-xl text-xs text-cyan-600 font-mono max-h-24 overflow-y-auto">
+                              Streaming... ({forgeStreamText.length} chars received)
+                            </div>
+                          )}
+
+                          <Button
+                            onClick={handleAdaptCard}
+                            disabled={isAdapting}
+                            className="w-full rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white py-6 text-lg shadow-md shadow-cyan-600/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                          >
+                            {isAdapting ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
+                            {isAdapting ? "Adapting..." : "Adapt to Style"}
+                          </Button>
+
+                          {adaptedCard && !isAdapting && (
+                            <div className="space-y-4 pt-4 border-t border-[#e5e4e2]">
+                              <div className="flex items-center justify-between">
+                                <h4 className="text-sm font-bold tracking-widest text-cyan-700 uppercase">Adapted Card</h4>
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleAdaptGenerateGreeting}
+                                    disabled={isAdapting}
+                                    className="rounded-full border-[#e5e4e2] hover:bg-cyan-50 hover:text-cyan-700"
+                                  >
+                                    <Plus className="w-3 h-3 mr-1" />
+                                    New Greeting
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={handleLoadAdaptedCard}
+                                    className="rounded-full border-[#e5e4e2] hover:bg-cyan-50 hover:text-cyan-700"
+                                  >
+                                    <FileText className="w-3 h-3 mr-1" />
+                                    Load into Preview
+                                  </Button>
+                                </div>
+                              </div>
+
+                              <div className="space-y-3">
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Name</span>
+                                  <p className="text-lg font-serif font-medium text-slate-900">{adaptedCard.name}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Description</span>
+                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.description}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Personality</span>
+                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.personality}</p>
+                                </div>
+                                <div>
+                                  <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">First Message</span>
+                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{adaptedCard.first_mes}</p>
+                                </div>
+                                {adaptedCard.alternate_greetings && adaptedCard.alternate_greetings.length > 0 && (
+                                  <div>
+                                    <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Alternate Greetings ({adaptedCard.alternate_greetings.length})</span>
+                                    {adaptedCard.alternate_greetings.map((g, idx) => (
+                                      <p key={idx} className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto mt-2">
+                                        <span className="text-xs text-slate-400 font-bold">Greeting {idx + 2}:</span> {g}
+                                      </p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </TabsContent>
+
+                      {/* Output Preview */}
+                      <TabsContent value="preview" className="mt-0 focus-visible:outline-none focus-visible:ring-0 h-full">
+                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
+                        <div className="flex items-center gap-3">
+                          <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Forged Output</h3>
+                          {forgedCard && (
+                            <span className="bg-slate-100 text-slate-500 text-xs font-mono px-2 py-1 rounded-md border border-slate-200">
+                              ~{estimateTokens((forgedCard.description || "") + (forgedCard.personality || "") + (forgedCard.first_mes || "") + (forgedCard.scenario || "") + (forgedCard.mes_example || ""))} total tokens
+                            </span>
+                          )}
+                        </div>
+                        {forgedCard && (
+                          <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto justify-start sm:justify-end">
+                            <div className="flex items-center gap-1 mr-0 sm:mr-2 w-full sm:w-auto justify-between sm:justify-start mb-2 sm:mb-0">
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={forgedCardHistory.undo}
+                                  disabled={!forgedCardHistory.canUndo}
+                                  className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                                  title="Undo Generated Card"
+                                >
+                                  <Undo2 className="w-4 h-4" />
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  onClick={forgedCardHistory.redo}
+                                  disabled={!forgedCardHistory.canRedo}
+                                  className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                                  title="Redo Generated Card"
+                                >
+                                  <Redo2 className="w-4 h-4" />
+                                </Button>
+                              </div>
+                            </div>
+                            <Button 
+                              onClick={saveForgedCard}
+                              variant="outline"
+                              className="flex-1 sm:flex-none rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                            >
+                              <Save className="w-4 h-4 mr-2" />
+                              Save
+                            </Button>
+                            <Button 
                               onClick={downloadForgedCard}
                               variant="outline"
-                              size="sm"
-                              className="rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors text-xs sm:text-sm"
+                              className="flex-1 sm:flex-none rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
                             >
-                              <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1 sm:mr-2" />
-                              <span className="hidden sm:inline">Download JSON</span>
-                              <span className="sm:hidden">JSON</span>
+                              <Download className="w-4 h-4 mr-2" />
+                              Download
                             </Button>
                           </div>
                         )}
@@ -1986,22 +3969,22 @@ export default function App() {
                             
                             {/* Image Generation Section */}
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
-                              <div className="flex items-center justify-between">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                                 <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
                                   <ImageIcon className="w-4 h-4 text-[#8B3A3A]" />
                                   Character Portrait
                                 </h4>
-                                <ModelSelector
-                                  sectionId="forge_image"
-                                  globalProvider={provider}
-                                  globalModels={apiModels}
-                                  sectionConfigs={sectionConfigs}
-                                  setSectionConfigs={setSectionConfigs}
-                                  availableModels={availableModels}
-                                  isFetchingModels={isFetchingModels}
-                                  allowedProviders={["gemini"]}
-                                  filterModels={(m) => m.id.includes("image") || m.id.includes("nano") || m.id.includes("banana")}
-                                />
+                                <div className="flex justify-start sm:justify-end">
+                                  <ConfiguredModelSelector apiKeys={apiKeys}
+                                    sectionId="forge_image_prompt"
+                                    globalProvider={provider}
+                                    globalModels={apiModels}
+                                    sectionConfigs={sectionConfigs}
+                                    setSectionConfigs={setSectionConfigs}
+                                    availableModels={availableModels}
+                                    isFetchingModels={isFetchingModels}
+                                  />
+                                </div>
                               </div>
                               
                               <div className="flex flex-col md:flex-row gap-4">
@@ -2023,99 +4006,42 @@ export default function App() {
                                       {isGeneratingImagePrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
                                       Generate Prompt
                                     </Button>
-                                    <Button 
-                                      onClick={handleGenerateImage} 
-                                      disabled={isGeneratingImage || !imagePrompt}
-                                      className="flex-1 rounded-xl text-xs h-9 bg-[#8B3A3A] hover:bg-[#7a3333] text-white"
-                                    >
-                                      {isGeneratingImage ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <ImageIcon className="w-3 h-3 mr-2" />}
-                                      Generate Image
-                                    </Button>
-                                  </div>
-                                  <div className="grid grid-cols-3 gap-2 mt-2">
-                                    <div className="space-y-1">
-                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Aspect Ratio</Label>
-                                      <select
-                                        value={imageAspectRatio}
-                                        onChange={(e) => setImageAspectRatio(e.target.value)}
-                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
-                                      >
-                                        <option value="1:1">1:1</option>
-                                        <option value="3:4">3:4</option>
-                                        <option value="4:3">4:3</option>
-                                        <option value="9:16">9:16</option>
-                                        <option value="16:9">16:9</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Size</Label>
-                                      <select
-                                        value={imageSize}
-                                        onChange={(e) => setImageSize(e.target.value)}
-                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
-                                      >
-                                        <option value="512px">512px</option>
-                                        <option value="1K">1K</option>
-                                        <option value="2K">2K</option>
-                                        <option value="4K">4K</option>
-                                      </select>
-                                    </div>
-                                    <div className="space-y-1">
-                                      <Label className="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Style</Label>
-                                      <select
-                                        value={imageStyle}
-                                        onChange={(e) => setImageStyle(e.target.value)}
-                                        className="flex h-8 w-full rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[#8B3A3A]/50"
-                                      >
-                                        <option value="None">None</option>
-                                        <option value="Photorealistic">Photoreal</option>
-                                        <option value="Anime / Manga">Anime</option>
-                                        <option value="Digital Art">Digital</option>
-                                        <option value="Oil Painting">Oil</option>
-                                        <option value="Dark Fantasy">Fantasy</option>
-                                        <option value="Cyberpunk">Cyberpunk</option>
-                                        <option value="Watercolor">Watercolor</option>
-                                        <option value="Comic Book">Comic</option>
-                                      </select>
-                                    </div>
-                                  </div>
-                                </div>
-                                
-                                <div className="w-full md:w-40 shrink-0 flex flex-col items-center justify-center">
-                                  <div className="w-32 h-40 md:w-full md:h-48 bg-white border border-slate-200 rounded-xl overflow-hidden flex items-center justify-center relative shadow-sm group">
-                                    {isGeneratingImage ? (
-                                      <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/80 backdrop-blur-sm z-10">
-                                        <Loader2 className="w-6 h-6 text-[#8B3A3A] animate-spin mb-2" />
-                                        <span className="text-[10px] font-medium text-slate-500 uppercase tracking-wider">Generating</span>
-                                      </div>
-                                    ) : characterImage ? (
-                                      <>
-                                        <img src={characterImage} alt="Character Portrait" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                          <Button
-                                            onClick={() => {
-                                              const a = document.createElement("a");
-                                              a.href = characterImage;
-                                              a.download = `portrait_${forgedCard.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() || Date.now()}.png`;
-                                              document.body.appendChild(a);
-                                              a.click();
-                                              document.body.removeChild(a);
-                                            }}
-                                            variant="secondary"
-                                            size="sm"
-                                            className="rounded-full text-xs"
-                                          >
-                                            <Download className="w-3 h-3 mr-1" />
-                                            Download
-                                          </Button>
-                                        </div>
-                                      </>
-                                    ) : (
-                                      <ImageIcon className="w-8 h-8 text-slate-300" />
-                                    )}
                                   </div>
                                 </div>
                               </div>
+                            </div>
+                            
+                            {/* Theme Song Section */}
+                            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
+                                <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
+                                  <Music className="w-4 h-4 text-[#8B3A3A]" />
+                                  Theme Song Suggestion
+                                </h4>
+                                <Button 
+                                  onClick={handleSuggestSong} 
+                                  disabled={isSuggestingSong}
+                                  variant="outline"
+                                  className="h-8 text-xs border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A] w-full sm:w-auto"
+                                >
+                                  {isSuggestingSong ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
+                                  Suggest Theme Song
+                                </Button>
+                              </div>
+                              {suggestedSong && (
+                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                  <div className="flex items-start gap-3">
+                                    <div className="bg-slate-100 p-2 rounded-lg text-[#8B3A3A]">
+                                      <Music className="w-5 h-5" />
+                                    </div>
+                                    <div>
+                                      <h5 className="font-bold text-slate-900">{suggestedSong.title}</h5>
+                                      <p className="text-sm text-slate-500 mb-2">by {suggestedSong.artist}</p>
+                                      <p className="text-sm text-slate-700 italic">"{suggestedSong.reason}"</p>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
                             </div>
 
                             <div>
@@ -2128,7 +4054,15 @@ export default function App() {
                             </div>
                             
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Description</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Description</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.description)} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.description)}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.description}
                                 onChange={(e) => setForgedCard({ ...forgedCard, description: e.target.value })}
@@ -2137,7 +4071,15 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Personality</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Personality</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.personality)} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.personality)}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.personality}
                                 onChange={(e) => setForgedCard({ ...forgedCard, personality: e.target.value })}
@@ -2146,8 +4088,16 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">First Message</h4>
-                              <Textarea 
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">First Message</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.first_mes)} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.first_mes)}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <Textarea
                                 value={forgedCard.first_mes}
                                 onChange={(e) => setForgedCard({ ...forgedCard, first_mes: e.target.value })}
                                 className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px] focus-visible:ring-[#8B3A3A]/50"
@@ -2155,7 +4105,67 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Scenario</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Alternate Greetings</h4>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleGenerateGreeting}
+                                  disabled={isGeneratingGreeting}
+                                  className="h-7 text-xs rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A]"
+                                >
+                                  {isGeneratingGreeting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Plus className="w-3 h-3 mr-1" />}
+                                  {isGeneratingGreeting ? "Generating..." : "Generate Greeting"}
+                                </Button>
+                              </div>
+                              {isGeneratingGreeting && forgeStreamText && (
+                                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-500 font-mono max-h-24 overflow-y-auto mb-3">
+                                  Streaming... ({forgeStreamText.length} chars received)
+                                </div>
+                              )}
+                              {(forgedCard.alternate_greetings?.length ?? 0) === 0 && !isGeneratingGreeting && (
+                                <p className="text-sm text-slate-400 italic">No alternate greetings yet. Click "Generate Greeting" to add one.</p>
+                              )}
+                              {forgedCard.alternate_greetings?.map((greeting, idx) => (
+                                <div key={idx} className="mb-3">
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs text-slate-400 font-mono">Greeting {idx + 2} &middot; ~{estimateTokens(greeting)} tokens</span>
+                                    <div className="flex items-center gap-1">
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(greeting)}>
+                                        <Copy className="w-3 h-3" />
+                                      </Button>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-red-500" onClick={() => {
+                                        const updated = [...(forgedCard.alternate_greetings || [])];
+                                        updated.splice(idx, 1);
+                                        setForgedCard({ ...forgedCard, alternate_greetings: updated });
+                                      }}>
+                                        <Trash2 className="w-3 h-3" />
+                                      </Button>
+                                    </div>
+                                  </div>
+                                  <Textarea
+                                    value={greeting}
+                                    onChange={(e) => {
+                                      const updated = [...(forgedCard.alternate_greetings || [])];
+                                      updated[idx] = e.target.value;
+                                      setForgedCard({ ...forgedCard, alternate_greetings: updated });
+                                    }}
+                                    className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[120px] focus-visible:ring-[#8B3A3A]/50"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+
+                            <div>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Scenario</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.scenario || "")} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.scenario || "")}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.scenario || ""}
                                 onChange={(e) => setForgedCard({ ...forgedCard, scenario: e.target.value })}
@@ -2164,7 +4174,15 @@ export default function App() {
                             </div>
 
                             <div>
-                              <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase mb-2">Example Messages</h4>
+                              <div className="flex items-center justify-between mb-2">
+                                <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Example Messages</h4>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.mes_example || "")} tokens</span>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.mes_example || "")}>
+                                    <Copy className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
                               <Textarea 
                                 value={forgedCard.mes_example || ""}
                                 onChange={(e) => setForgedCard({ ...forgedCard, mes_example: e.target.value })}
@@ -2212,8 +4230,9 @@ export default function App() {
                           </div>
                         </ScrollArea>
                       )}
-                    </div>
-                  </div>
+                        </div>
+                      </TabsContent>
+                    </Tabs>
                   )}
                 </motion.div>
               )}
@@ -2232,103 +4251,219 @@ export default function App() {
                     <div>
                       <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Universe Map</h2>
                       <p className="text-slate-500 text-base md:text-lg font-light mt-2">
-                        Visualize character relationships and the NPC-to-Protagonist pipeline.
+                        Visualize character relationships and extract shared universes.
                       </p>
                     </div>
-                    <ModelSelector
-                      sectionId="universe"
-                      globalProvider={provider}
-                      globalModels={apiModels}
-                      sectionConfigs={sectionConfigs}
-                      setSectionConfigs={setSectionConfigs}
-                      availableModels={availableModels}
-                      isFetchingModels={isFetchingModels}
-                    />
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
+                      <Button 
+                        onClick={() => handleSaveDraft('app')}
+                        variant="outline"
+                        className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Draft
+                      </Button>
+                      <ConfiguredModelSelector apiKeys={apiKeys}
+                        sectionId="universe"
+                        globalProvider={provider}
+                        globalModels={apiModels}
+                        sectionConfigs={sectionConfigs}
+                        setSectionConfigs={setSectionConfigs}
+                        availableModels={availableModels}
+                        isFetchingModels={isFetchingModels}
+                      />
+                    </div>
                   </div>
 
-                  <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
-                    <div className="flex flex-col md:flex-row gap-4 items-end">
-                      <div className="space-y-2 flex-1 w-full">
-                        <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
-                          Select Style Guide to Analyze (Optional)
-                        </Label>
-                        <select
-                          id="universeGuideSelect"
-                          value={universeSelectedGuide}
-                          onChange={(e) => setUniverseSelectedGuide(e.target.value)}
-                          className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                  <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+                      <div className="flex flex-col md:flex-row gap-4 items-end">
+                        <div className="space-y-2 flex-1 w-full">
+                          <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
+                            Select Style Guide to Analyze (Optional)
+                          </Label>
+                          <select
+                            id="universeGuideSelect"
+                            value={universeSelectedGuide}
+                            onChange={(e) => setUniverseSelectedGuide(e.target.value)}
+                            className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                          >
+                            <option value="">No guide selected (Use cards only)</option>
+                            <GuideOptions guides={guides} />
+                          </select>
+                        </div>
+                        <Button 
+                          onClick={handleExtractUniverse} 
+                          disabled={isExtractingUniverse || (!universeSelectedGuide && universeSelectedCards.size === 0)} 
+                          className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
                         >
-                          <option value="">No guide selected (Use cards only)</option>
-                          {guides.map((g) => (
-                            <option key={g.id} value={g.id}>{g.title}</option>
-                          ))}
-                        </select>
+                          {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
+                          Extract Universe
+                        </Button>
                       </div>
+
+                      {savedCards.length > 0 && (
+                        <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
+                          <Label className="text-slate-700 font-medium flex items-center">
+                            Include Saved Cards in Lore Building
+                          </Label>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            {savedCards.map(card => (
+                              <div key={card.id} className="flex items-center space-x-2 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]">
+                                <Checkbox 
+                                  id={`universe-card-${card.id}`}
+                                  checked={universeSelectedCards.has(card.id)}
+                                  onCheckedChange={(checked) => {
+                                    setUniverseSelectedCards(prev => {
+                                      const next = new Set(prev);
+                                      if (checked) next.add(card.id);
+                                      else next.delete(card.id);
+                                      return next;
+                                    });
+                                  }}
+                                />
+                                <label
+                                  htmlFor={`universe-card-${card.id}`}
+                                  className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer truncate"
+                                >
+                                  {card.name}
+                                </label>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-h-[500px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
+                      {isExtractingUniverse ? (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/80 backdrop-blur-sm z-20">
+                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                          <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Analyzing Relationships...</h4>
+                          <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
+                            Extracting characters, shared universes, and pipeline progressions.
+                          </p>
+                        </div>
+                      ) : universeData && universeData.nodes.length > 0 ? (
+                        <UniverseMap data={universeData} onAddLink={handleAddUniverseLink} />
+                      ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
+                          <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
+                            <Network className="w-6 h-6 text-slate-400" />
+                          </div>
+                          <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
+                          <p className="text-slate-500 mt-2 max-w-xs text-sm">
+                            Select a style guide or character cards, then click Extract Universe to visualize relationships.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+
+              {/* SCRIPT FORGE VIEW */}
+              {view === "script" && (
+                <motion.div
+                  key="script"
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -10 }}
+                  transition={{ duration: 0.3 }}
+                  className="space-y-6 md:space-y-8 h-full flex flex-col"
+                >
+                  <div className="border-b border-[#e5e4e2] pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div>
+                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Script Forge</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                        Build JanitorAI scripts and lorebooks.
+                      </p>
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-end">
                       <Button 
-                        onClick={handleExtractUniverse} 
-                        disabled={isExtractingUniverse || (!universeSelectedGuide && universeSelectedCards.size === 0)} 
+                        onClick={() => handleSaveDraft('app')}
+                        variant="outline"
+                        className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Draft
+                      </Button>
+                      <ConfiguredModelSelector apiKeys={apiKeys}
+                        sectionId="script"
+                        globalProvider={provider}
+                        globalModels={apiModels}
+                        sectionConfigs={sectionConfigs}
+                        setSectionConfigs={setSectionConfigs}
+                        availableModels={availableModels}
+                        isFetchingModels={isFetchingModels}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
+                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700 font-medium">Describe the Script You Want</Label>
+                        <p className="text-sm text-slate-500">
+                          Explain what you want the JanitorAI script to do. For example: "Make the character fall asleep if the user says 'goodnight'", or "Create a lorebook for a magical forest".
+                        </p>
+                        <Textarea
+                          value={scriptPrompt}
+                          onChange={(e) => setScriptPrompt(e.target.value)}
+                          placeholder="Describe your script logic here..."
+                          className="min-h-[120px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                        />
+                      </div>
+                      <Button
+                        onClick={handleGenerateScript}
+                        disabled={isGeneratingScript || !scriptPrompt.trim()}
                         className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
                       >
-                        {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
-                        Extract Universe
+                        {isGeneratingScript ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
+                        Generate Script
                       </Button>
                     </div>
 
-                    {savedCards.length > 0 && (
-                      <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
-                        <Label className="text-slate-700 font-medium flex items-center">
-                          Include Saved Cards in Lore Building
-                        </Label>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                          {savedCards.map(card => (
-                            <div key={card.id} className="flex items-center space-x-2 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]">
-                              <Checkbox 
-                                id={`universe-card-${card.id}`}
-                                checked={universeSelectedCards.has(card.id)}
-                                onCheckedChange={(checked) => {
-                                  setUniverseSelectedCards(prev => {
-                                    const next = new Set(prev);
-                                    if (checked) next.add(card.id);
-                                    else next.delete(card.id);
-                                    return next;
-                                  });
-                                }}
-                              />
-                              <label
-                                htmlFor={`universe-card-${card.id}`}
-                                className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer truncate"
-                              >
-                                {card.name}
-                              </label>
-                            </div>
-                          ))}
+                    <div className="flex-1 min-h-[400px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden flex flex-col">
+                      <div className="p-4 border-b border-[#e5e4e2] bg-[#f9f8f6] flex justify-between items-center">
+                        <div className="flex items-center gap-4">
+                          <h3 className="font-medium text-slate-700">Generated Script</h3>
+                          {scriptValidationError && (
+                            <span className="text-xs font-medium text-red-600 bg-red-50 px-2 py-1 rounded-md border border-red-200">
+                              {scriptValidationError}
+                            </span>
+                          )}
                         </div>
+                        {generatedScript && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              navigator.clipboard.writeText(generatedScript);
+                              alert("Script copied to clipboard!");
+                            }}
+                            className="h-8 rounded-lg"
+                          >
+                            <Copy className="w-4 h-4 mr-2" />
+                            Copy
+                          </Button>
+                        )}
                       </div>
-                    )}
-                  </div>
-
-                  <div className="flex-1 min-h-[500px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
-                    {isExtractingUniverse ? (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/80 backdrop-blur-sm z-20">
-                        <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
-                        <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Analyzing Relationships...</h4>
-                        <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
-                          Extracting characters, shared universes, and pipeline progressions.
-                        </p>
+                      <div className="flex-1 p-4 overflow-auto bg-slate-900 text-slate-50 font-mono text-sm">
+                        {isGeneratingScript ? (
+                          <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                            <Loader2 className="w-8 h-8 animate-spin mb-4" />
+                            <p>Forging script...</p>
+                          </div>
+                        ) : generatedScript ? (
+                          <pre className="whitespace-pre-wrap break-words">{generatedScript}</pre>
+                        ) : (
+                          <div className="h-full flex flex-col items-center justify-center text-slate-500">
+                            <p>Your generated script will appear here.</p>
+                          </div>
+                        )}
                       </div>
-                    ) : universeData && universeData.nodes.length > 0 ? (
-                      <UniverseMap data={universeData} onAddLink={handleAddUniverseLink} />
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
-                        <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
-                          <Network className="w-6 h-6 text-slate-400" />
-                        </div>
-                        <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
-                        <p className="text-slate-500 mt-2 max-w-xs text-sm">
-                          Select a style guide or character cards, then click Extract Universe to visualize relationships.
-                        </p>
-                      </div>
-                    )}
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -2354,7 +4489,12 @@ export default function App() {
                     <div>
                       <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                        {(["gemini", "anthropic", "openrouter", "openai", "custom"] as AIProvider[]).map((p) => (
+                        {(["gemini", "anthropic", "openrouter", "openrouter-responses", "openai", "openai-responses", "custom"] as AIProvider[]).map((p) => {
+                          let label = p as string;
+                          if (p === "openai-responses") label = "OpenAI (Responses)";
+                          else if (p === "openrouter") label = "OpenRouter";
+                          else if (p === "openrouter-responses") label = "OpenRouter (Resp)";
+                          return (
                           <div
                             key={p}
                             className={cn(
@@ -2365,9 +4505,9 @@ export default function App() {
                             )}
                             onClick={() => setProvider(p)}
                           >
-                            <span className="font-medium capitalize tracking-wide">{p}</span>
+                            <span className="font-medium capitalize tracking-wide">{label}</span>
                           </div>
-                        ))}
+                        )})}
                       </div>
                     </div>
 
@@ -2376,13 +4516,11 @@ export default function App() {
                       <div className="space-y-4 md:space-y-6">
                         <div className="space-y-2">
                           <Label htmlFor="gemini" className="text-slate-700 font-medium">Gemini API Key</Label>
-                          <Input
+                          <ApiKeyInput
                             id="gemini"
-                            type="password"
                             placeholder="AIzaSy..."
                             value={apiKeys.gemini}
                             onChange={(e) => setApiKeys({ ...apiKeys, gemini: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           <p className="text-xs text-slate-500">Leave blank to use the default AI Studio key.</p>
                           {availableModels["gemini"]?.length > 0 && (
@@ -2404,13 +4542,11 @@ export default function App() {
                         
                         <div className="space-y-2">
                           <Label htmlFor="anthropic" className="text-slate-700 font-medium">Anthropic API Key</Label>
-                          <Input
+                          <ApiKeyInput
                             id="anthropic"
-                            type="password"
                             placeholder="sk-ant-..."
                             value={apiKeys.anthropic}
                             onChange={(e) => setApiKeys({ ...apiKeys, anthropic: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           {availableModels["anthropic"]?.length > 0 && (
                             <div className="mt-2">
@@ -2429,19 +4565,76 @@ export default function App() {
                           )}
                         </div>
 
-                        <div className="space-y-2">
-                          <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key</Label>
-                          <Input
+                        <div className="space-y-4 pt-6 md:pt-8 border-t border-[#e5e4e2]">
+                          <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Storage Management</h3>
+                          <p className="text-sm text-slate-500 mb-4">
+                            All your data is currently stored in your browser's private storage (IndexedDB).
+                            If you switch devices, clear your browser cache, or notice missing data after a deployment, 
+                            use these tools to backup or recover your information.
+                          </p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <Button 
+                              onClick={handleExportData}
+                              variant="outline"
+                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                            >
+                              <div className="flex flex-col items-start">
+                                <span className="flex items-center font-medium text-slate-900">
+                                  <Download className="w-4 h-4 mr-2" />
+                                  Export All Data
+                                </span>
+                                <span className="text-xs text-slate-500 mt-1">Download backup as .json</span>
+                              </div>
+                            </Button>
+                            
+                            <Button 
+                              onClick={() => importInputRef.current?.click()}
+                              variant="outline"
+                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                            >
+                              <div className="flex flex-col items-start">
+                                <span className="flex items-center font-medium text-slate-900">
+                                  <Upload className="w-4 h-4 mr-2" />
+                                  Import Data
+                                </span>
+                                <span className="text-xs text-slate-500 mt-1">Restore from a .json backup</span>
+                              </div>
+                              <input 
+                                type="file" 
+                                ref={importInputRef} 
+                                onChange={handleImportData} 
+                                className="hidden" 
+                                accept="application/json"
+                              />
+                            </Button>
+
+                            <Button 
+                              onClick={recoverLegacyData}
+                              variant="outline"
+                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                            >
+                              <div className="flex flex-col items-start">
+                                <span className="flex items-center font-medium text-slate-900">
+                                  <RefreshCw className="w-4 h-4 mr-2" />
+                                  Check Legacy Storage
+                                </span>
+                                <span className="text-xs text-slate-500 mt-1">Recover data from localStorage</span>
+                              </div>
+                            </Button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 pt-6 md:pt-8 border-t border-[#e5e4e2]">
+                          <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key (shared with Responses API)</Label>
+                          <ApiKeyInput
                             id="openai"
-                            type="password"
                             placeholder="sk-proj-..."
                             value={apiKeys.openai}
                             onChange={(e) => setApiKeys({ ...apiKeys, openai: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           {availableModels["openai"]?.length > 0 && (
                             <div className="mt-2">
-                              <Label htmlFor="openai-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <Label htmlFor="openai-model" className="text-slate-700 font-medium text-sm">Chat Completions Model</Label>
                               <select
                                 id="openai-model"
                                 value={apiModels["openai"] || ""}
@@ -2454,21 +4647,34 @@ export default function App() {
                               </select>
                             </div>
                           )}
+                          {availableModels["openai-responses"]?.length > 0 && (
+                            <div className="mt-2 py-1">
+                              <Label htmlFor="openai-responses-model" className="text-slate-700 font-medium text-sm">Responses API Model</Label>
+                              <select
+                                id="openai-responses-model"
+                                value={apiModels["openai-responses"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, "openai-responses": e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm shadow-sm"
+                              >
+                                {availableModels["openai-responses"].map(m => (
+                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                              </select>
+                            </div>
+                          )}
                         </div>
 
                         <div className="space-y-2">
                           <Label htmlFor="openrouter" className="text-slate-700 font-medium">OpenRouter API Key</Label>
-                          <Input
+                          <ApiKeyInput
                             id="openrouter"
-                            type="password"
                             placeholder="sk-or-v1-..."
                             value={apiKeys.openrouter}
                             onChange={(e) => setApiKeys({ ...apiKeys, openrouter: e.target.value })}
-                            className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
                           />
                           {availableModels["openrouter"]?.length > 0 && (
                             <div className="mt-2">
-                              <Label htmlFor="openrouter-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                              <Label htmlFor="openrouter-model" className="text-slate-700 font-medium text-sm">Chat Completions Model</Label>
                               <select
                                 id="openrouter-model"
                                 value={apiModels["openrouter"] || ""}
@@ -2481,45 +4687,161 @@ export default function App() {
                               </select>
                             </div>
                           )}
-                        </div>
-
-                        <div className="pt-6 mt-6 border-t border-[#e5e4e2] space-y-6">
-                          <h4 className="font-medium text-slate-900">Custom API Endpoint</h4>
-                          <div className="space-y-2">
-                            <Label htmlFor="customEndpoint" className="text-slate-700 font-medium">Endpoint URL</Label>
-                            <Input
-                              id="customEndpoint"
-                              placeholder="https://your-api.com/v1/chat/completions"
-                              value={apiKeys.customEndpoint}
-                              onChange={(e) => setApiKeys({ ...apiKeys, customEndpoint: e.target.value })}
-                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="customKey" className="text-slate-700 font-medium">Custom API Key</Label>
-                            <Input
-                              id="customKey"
-                              type="password"
-                              value={apiKeys.customKey}
-                              onChange={(e) => setApiKeys({ ...apiKeys, customKey: e.target.value })}
-                              className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
-                            />
-                          </div>
-                          {availableModels["custom"]?.length > 0 && (
-                            <div className="mt-2">
-                              <Label htmlFor="custom-model" className="text-slate-700 font-medium text-sm">Model</Label>
+                          {availableModels["openrouter-responses"]?.length > 0 && (
+                            <div className="mt-2 py-1">
+                              <Label htmlFor="openrouter-responses-model" className="text-slate-700 font-medium text-sm">Responses API Model</Label>
                               <select
-                                id="custom-model"
-                                value={apiModels["custom"] || ""}
-                                onChange={(e) => setApiModels({ ...apiModels, custom: e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                id="openrouter-responses-model"
+                                value={apiModels["openrouter-responses"] || ""}
+                                onChange={(e) => setApiModels({ ...apiModels, "openrouter-responses": e.target.value })}
+                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm shadow-sm"
                               >
-                                {availableModels["custom"].map(m => (
+                                {availableModels["openrouter-responses"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
                                 ))}
                               </select>
                             </div>
                           )}
+                        </div>
+
+                        <div className="pt-6 mt-6 border-t border-[#e5e4e2] space-y-6">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-medium text-slate-900">Custom API Endpoints</h4>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              className="rounded-full text-xs"
+                              onClick={() => {
+                                const id = `custom-${Date.now()}`;
+                                setApiKeys({
+                                  ...apiKeys,
+                                  customEndpoints: [
+                                    ...(apiKeys.customEndpoints || []),
+                                    { id, name: "New Endpoint", url: "", key: "" }
+                                  ]
+                                });
+                              }}
+                            >
+                              <Plus className="w-3 h-3 mr-1" />
+                              Add Endpoint
+                            </Button>
+                          </div>
+                          
+                          {/* Legacy Custom Endpoint */}
+                          <div className="p-4 border border-[#e5e4e2] rounded-xl space-y-4 bg-slate-50">
+                            <div className="flex items-center justify-between">
+                              <h5 className="text-sm font-semibold text-slate-700">Legacy Custom Endpoint</h5>
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="customEndpoint" className="text-slate-700 font-medium text-xs">Endpoint URL</Label>
+                              <Input
+                                id="customEndpoint"
+                                placeholder="https://your-api.com/v1/chat/completions"
+                                value={apiKeys.customEndpoint}
+                                onChange={(e) => setApiKeys({ ...apiKeys, customEndpoint: e.target.value })}
+                                className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="customKey" className="text-slate-700 font-medium text-xs">Custom API Key</Label>
+                              <ApiKeyInput
+                                id="customKey"
+                                placeholder="sk-..."
+                                value={apiKeys.customKey}
+                                onChange={(e) => setApiKeys({ ...apiKeys, customKey: e.target.value })}
+                              />
+                            </div>
+                            {availableModels["custom"]?.length > 0 && (
+                              <div className="mt-2">
+                                <Label htmlFor="custom-model" className="text-slate-700 font-medium text-xs">Model</Label>
+                                <select
+                                  id="custom-model"
+                                  value={apiModels["custom"] || ""}
+                                  onChange={(e) => setApiModels({ ...apiModels, custom: e.target.value })}
+                                  className="w-full mt-1 rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                >
+                                  {availableModels["custom"].map(m => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Dynamic Custom Endpoints */}
+                          {apiKeys.customEndpoints?.map((ep, index) => (
+                            <div key={ep.id} className="p-4 border border-[#e5e4e2] rounded-xl space-y-4 bg-slate-50 relative">
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute top-2 right-2 text-slate-400 hover:text-red-500 rounded-full h-8 w-8"
+                                onClick={() => {
+                                  setApiKeys({
+                                    ...apiKeys,
+                                    customEndpoints: apiKeys.customEndpoints?.filter((_, i) => i !== index)
+                                  });
+                                }}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                              <div className="space-y-2 pr-8">
+                                <Label htmlFor={`ep-name-${ep.id}`} className="text-slate-700 font-medium text-xs">Endpoint Name</Label>
+                                <Input
+                                  id={`ep-name-${ep.id}`}
+                                  placeholder="e.g. My Local LLM"
+                                  value={ep.name}
+                                  onChange={(e) => {
+                                    const newEndpoints = [...(apiKeys.customEndpoints || [])];
+                                    newEndpoints[index] = { ...ep, name: e.target.value };
+                                    setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
+                                  }}
+                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`ep-url-${ep.id}`} className="text-slate-700 font-medium text-xs">Endpoint URL</Label>
+                                <Input
+                                  id={`ep-url-${ep.id}`}
+                                  placeholder="https://your-api.com/v1/chat/completions"
+                                  value={ep.url}
+                                  onChange={(e) => {
+                                    const newEndpoints = [...(apiKeys.customEndpoints || [])];
+                                    newEndpoints[index] = { ...ep, url: e.target.value };
+                                    setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
+                                  }}
+                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <Label htmlFor={`ep-key-${ep.id}`} className="text-slate-700 font-medium text-xs">Custom API Key</Label>
+                                <ApiKeyInput
+                                  id={`ep-key-${ep.id}`}
+                                  placeholder="sk-..."
+                                  value={ep.key}
+                                  onChange={(e) => {
+                                    const newEndpoints = [...(apiKeys.customEndpoints || [])];
+                                    newEndpoints[index] = { ...ep, key: e.target.value };
+                                    setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
+                                  }}
+                                />
+                              </div>
+                              {availableModels[ep.id]?.length > 0 && (
+                                <div className="mt-2">
+                                  <Label htmlFor={`model-${ep.id}`} className="text-slate-700 font-medium text-xs">Model</Label>
+                                  <select
+                                    id={`model-${ep.id}`}
+                                    value={apiModels[ep.id] || ""}
+                                    onChange={(e) => setApiModels({ ...apiModels, [ep.id]: e.target.value })}
+                                    className="w-full mt-1 rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                  >
+                                    {availableModels[ep.id].map(m => (
+                                      <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </div>
@@ -2527,6 +4849,94 @@ export default function App() {
                 </motion.div>
               )}
 
+            </AnimatePresence>
+
+            {/* Template Editor Modal */}
+            <AnimatePresence>
+              {isTemplateEditorOpen && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    className="bg-white rounded-3xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-[#e5e4e2]"
+                  >
+                    <div className="p-6 border-b border-[#e5e4e2] flex justify-between items-center bg-[#f9f8f6]">
+                      <h3 className="text-2xl font-serif font-medium text-slate-900">
+                        {editingTemplateId ? "Edit Template" : "Create New Template"}
+                      </h3>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => setIsTemplateEditorOpen(false)}
+                        className="rounded-full hover:bg-white text-slate-500 hover:text-slate-900"
+                      >
+                        <X className="w-5 h-5" />
+                      </Button>
+                    </div>
+                    <div className="p-6 overflow-y-auto flex-1 space-y-6">
+                      <div className="space-y-2">
+                        <Label htmlFor="templateName" className="text-slate-700 font-medium">Template Name <span className="text-red-500">*</span></Label>
+                        <Input
+                          id="templateName"
+                          value={editingTemplateName}
+                          onChange={(e) => handleTemplateFieldChange('name', e.target.value)}
+                          placeholder="e.g. My Custom RPG Template"
+                          className="h-11 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="templateContent" className="text-slate-700 font-medium">Template Content <span className="text-red-500">*</span></Label>
+                        <p className="text-sm text-slate-500">Define the structure of the character card. Use Markdown or plain text.</p>
+                        <Textarea
+                          id="templateContent"
+                          value={editingTemplateContent}
+                          onChange={(e) => handleTemplateFieldChange('content', e.target.value)}
+                          placeholder="Setting:&#10;* Full Name:&#10;* Age:&#10;..."
+                          className="min-h-[300px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] font-mono text-sm"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="templateExample" className="text-slate-700 font-medium">Template Example (Optional)</Label>
+                        <p className="text-sm text-slate-500">Provide an example of a filled-out template to guide the AI.</p>
+                        <Textarea
+                          id="templateExample"
+                          value={editingTemplateExample}
+                          onChange={(e) => handleTemplateFieldChange('example', e.target.value)}
+                          placeholder="Setting: Modern Day&#10;* Full Name: John Doe&#10;* Age: 30&#10;..."
+                          className="min-h-[200px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] font-mono text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="p-6 border-t border-[#e5e4e2] bg-[#f9f8f6] flex justify-between items-center">
+                      <Button
+                        variant="outline"
+                        onClick={() => handleSaveDraft('template')}
+                        className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 text-slate-700"
+                      >
+                        <Save className="w-4 h-4 mr-2" />
+                        Save Draft
+                      </Button>
+                      <div className="flex gap-3">
+                        <Button
+                          variant="outline"
+                          onClick={() => setIsTemplateEditorOpen(false)}
+                          className="rounded-xl border-[#e5e4e2] hover:bg-white text-slate-700"
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          onClick={saveTemplate}
+                          className="rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20"
+                        >
+                          <Save className="w-4 h-4 mr-2" />
+                          Save Template
+                        </Button>
+                      </div>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
             </AnimatePresence>
 
             {/* Hidden Export Container */}
@@ -2576,6 +4986,21 @@ export default function App() {
             )}
           </div>
         </ScrollArea>
+      </div>
+
+      {/* Mobile Bottom Nav */}
+      <div className="md:hidden flex-none border-t border-[#e5e4e2] bg-[#f9f8f6]/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)] z-30 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
+        <nav className="flex overflow-x-auto px-4 py-2 space-x-1.5 no-scrollbar snap-x snap-mandatory">
+          <NavButton view="upload" icon={Upload} label="Ingestion" currentView={view} setView={setView} />
+          <NavButton view="fanfiction" icon={Feather} label="Fanfiction" currentView={view} setView={setView} />
+          <NavButton view="generate" icon={FileText} label="Guide" currentView={view} setView={setView} />
+          <NavButton view="saved" icon={BookOpen} label="Library" currentView={view} setView={setView} />
+          <NavButton view="create" icon={Wand2} label="Forge" currentView={view} setView={setView} />
+          <NavButton view="universe" icon={Network} label="Universe" currentView={view} setView={setView} />
+          <NavButton view="script" icon={FileJson} label="Script" currentView={view} setView={setView} />
+          <NavButton view="settings" icon={Settings} label="Settings" currentView={view} setView={setView} />
+          <div className="w-1 flex-none" aria-hidden="true" />
+        </nav>
       </div>
     </div>
   );

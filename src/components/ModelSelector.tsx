@@ -2,6 +2,13 @@ import React from 'react';
 import { Label } from './ui/label';
 import { AIProvider, AIModel } from '../lib/api';
 
+export interface CustomEndpoint {
+  id: string;
+  name: string;
+  url: string;
+  key: string;
+}
+
 interface ModelSelectorProps {
   sectionId: string;
   globalProvider: AIProvider;
@@ -10,15 +17,18 @@ interface ModelSelectorProps {
   setSectionConfigs: React.Dispatch<React.SetStateAction<Record<string, { provider: AIProvider; model: string }>>>;
   availableModels: Record<string, AIModel[]>;
   isFetchingModels: Record<string, boolean>;
-  allowedProviders?: AIProvider[];
+  allowedProviders?: string[];
   filterModels?: (model: AIModel) => boolean;
+  customEndpoints?: CustomEndpoint[];
 }
 
-const ALL_PROVIDERS: { id: AIProvider; name: string }[] = [
+const BASE_PROVIDERS: { id: string; name: string }[] = [
   { id: "gemini", name: "Google Gemini" },
   { id: "anthropic", name: "Anthropic Claude" },
   { id: "openai", name: "OpenAI" },
+  { id: "openai-responses", name: "OpenAI (Responses)" },
   { id: "openrouter", name: "OpenRouter" },
+  { id: "openrouter-responses", name: "OpenRouter (Responses)" },
   { id: "custom", name: "Custom Endpoint" }
 ];
 
@@ -31,8 +41,14 @@ export function ModelSelector({
   availableModels,
   isFetchingModels,
   allowedProviders,
-  filterModels
+  filterModels,
+  customEndpoints
 }: ModelSelectorProps) {
+  const ALL_PROVIDERS = [...BASE_PROVIDERS];
+  if (customEndpoints) {
+    customEndpoints.forEach(ep => ALL_PROVIDERS.push({ id: ep.id, name: ep.name }));
+  }
+
   const config = sectionConfigs[sectionId];
   
   // Ensure the current provider is allowed
@@ -77,26 +93,26 @@ export function ModelSelector({
     : ALL_PROVIDERS;
 
   return (
-    <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-center">
-      <div className="flex items-center gap-2">
-        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap">Provider</Label>
+    <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 items-start sm:items-center w-full sm:w-auto">
+      <div className="flex items-center gap-2 w-full sm:w-auto">
+        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap min-w-[60px]">Provider</Label>
         <select
           value={currentProvider}
           onChange={(e) => handleProviderChange(e.target.value as AIProvider)}
-          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all"
+          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all w-full sm:w-auto"
         >
           {providersToShow.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
       </div>
-      <div className="flex items-center gap-2">
-        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap">Model</Label>
+      <div className="flex items-center gap-2 w-full sm:w-auto">
+        <Label className="text-slate-700 font-medium text-xs uppercase tracking-wider whitespace-nowrap min-w-[60px]">Model</Label>
         <select
           value={currentModel}
           onChange={(e) => handleModelChange(e.target.value)}
           disabled={isFetchingModels[currentProvider] || modelsToShow.length === 0}
-          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all disabled:opacity-50 max-w-[200px] truncate"
+          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all disabled:opacity-50 w-full sm:max-w-[200px] truncate"
         >
           {isFetchingModels[currentProvider] ? (
             <option value="">Loading models...</option>
