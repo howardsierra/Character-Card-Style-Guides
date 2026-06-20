@@ -254,16 +254,16 @@ async function callAIProvider(
       case "openai": {
         const body: any = {
           model: model || "gpt-4-turbo-preview",
-          max_completion_tokens: maxTokens,
-          messages: [
+          max_output_tokens: maxTokens,
+          input: [
             { role: "system", content: systemPrompt },
             { role: "user", content: prompt }
           ],
         };
         if (jsonMode) {
-          body.response_format = { type: "json_object" };
+          body.text = { format: { type: "json_object" } };
         }
-        const res = await fetch("https://api.openai.com/v1/chat/completions", {
+        const res = await fetch("https://api.openai.com/v1/responses", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -277,11 +277,12 @@ async function callAIProvider(
           throw new Error(`OpenAI API error: ${errMsg}`);
         }
         const data = await res.json();
-        const choice = data.choices?.[0];
-        if (!choice) {
-          throw new Error(`OpenAI returned no choices. Response: ${JSON.stringify(data).substring(0, 200)}`);
+        const outputMessage = data.output?.find((item: any) => item.type === "message");
+        const textContent = outputMessage?.content?.find((c: any) => c.type === "output_text");
+        if (!textContent) {
+          throw new Error(`OpenAI returned no text output. Response: ${JSON.stringify(data).substring(0, 200)}`);
         }
-        return choice.message?.content || choice.text || "";
+        return textContent.text || "";
       }
       case "openrouter": {
         const body: any = {
