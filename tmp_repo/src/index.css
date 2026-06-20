@@ -121,9 +121,4 @@ h1, h2, h3, h4, h5, h6 {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-
-  .mask-fade-edges {
-    mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
-    -webkit-mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);
-  }
 }
