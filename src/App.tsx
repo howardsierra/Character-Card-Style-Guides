@@ -294,6 +294,7 @@ export default function App() {
   };
 
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
+  const [forgeTokenLimit, setForgeTokenLimit] = useState<number | "">(0);
   const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>("");
   const [customTemplates, setCustomTemplates] = useState<CardTemplate[]>([]);
   const [isTemplateEditorOpen, setIsTemplateEditorOpen] = useState(false);
@@ -1840,7 +1841,8 @@ export default function App() {
         currentModel,
         forgeFirstMessageIdea,
         templateExample,
-        (partial) => setForgeStreamText(partial)
+        (partial) => setForgeStreamText(partial),
+        forgeTokenLimit || undefined
       );
       setForgedCard(result);
       setForgeStreamText("");
@@ -3571,7 +3573,23 @@ export default function App() {
                       )}
 
                       <div className="flex flex-col gap-2 mt-4">
-                        <div className="flex justify-end">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="forge-token-limit" className="text-xs font-bold tracking-widest text-slate-400 uppercase whitespace-nowrap">
+                              Token Limit
+                            </Label>
+                            <InfoTooltip text="Set a target token count for the generated card. Leave at 0 or empty for no limit. Typical cards range from 500–2000 tokens." />
+                            <Input
+                              id="forge-token-limit"
+                              type="number"
+                              min={0}
+                              step={100}
+                              placeholder="No limit"
+                              value={forgeTokenLimit === 0 ? "" : forgeTokenLimit}
+                              onChange={(e) => setForgeTokenLimit(e.target.value === "" ? 0 : parseInt(e.target.value, 10) || 0)}
+                              className="w-28 h-8 text-xs rounded-lg border-[#e5e4e2] bg-[#f9f8f6] focus-visible:ring-[#8B3A3A]/50"
+                            />
+                          </div>
                           <ConfiguredModelSelector apiKeys={apiKeys}
                             sectionId="forge_generate"
                             globalProvider={provider}

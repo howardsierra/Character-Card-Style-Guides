@@ -831,7 +831,8 @@ export async function generateCharacterCard(
   model?: string,
   firstMessageIdea?: string,
   templateExample?: string,
-  onChunk?: (text: string) => void
+  onChunk?: (text: string) => void,
+  tokenLimit?: number
 ): Promise<CharacterCard> {
   const detailsStr = slots.map(s => `${s.name}: ${s.value}`).join("\n");
   
@@ -891,6 +892,10 @@ ${styleGuide}
 
   if (firstMessageIdea) {
     prompt += `\nFIRST MESSAGE / SCENARIO IDEA:\nThe user has provided the following idea for the character's first message and scenario. Use this as the core premise for the 'first_mes' and 'scenario' fields, writing it in the tone and prose dictated by the Style Guide:\n"${firstMessageIdea}"\n`;
+  }
+
+  if (tokenLimit && tokenLimit > 0) {
+    prompt += `\nTOKEN LIMIT CONSTRAINT:\nThe TOTAL character card output must be approximately ${tokenLimit} tokens (roughly ${tokenLimit * 4} characters). Distribute the token budget across all fields proportionally. Keep descriptions dense and concise to fit within this limit. Do NOT exceed this target length.\n`;
   }
 
   prompt += `
