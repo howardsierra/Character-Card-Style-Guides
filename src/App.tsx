@@ -294,7 +294,8 @@ export default function App() {
   };
 
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
-  const [forgeTokenLimit, setForgeTokenLimit] = useState<number | "">(0);
+  // 0 means "no limit"; the input renders an empty field for that value.
+  const [forgeTokenLimit, setForgeTokenLimit] = useState<number>(0);
   const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>("");
   const [customTemplates, setCustomTemplates] = useState<CardTemplate[]>([]);
   const [isTemplateEditorOpen, setIsTemplateEditorOpen] = useState(false);
@@ -466,7 +467,10 @@ export default function App() {
     const savedProvider = localStorage.getItem("st_style_provider");
     if (savedProvider) setProvider(savedProvider as AIProvider);
 
-    localforage.getItem("st_forge_draft").then((savedDraftData: any) => {
+    localforage.getItem("st_forge_draft").catch(e => {
+      console.error("Failed to load forge draft", e);
+      return null;
+    }).then((savedDraftData: any) => {
       if (savedDraftData) {
         if (savedDraftData.forgeName) setForgeName(savedDraftData.forgeName);
         if (savedDraftData.forgeConcept) setForgeConcept(savedDraftData.forgeConcept);
@@ -522,6 +526,11 @@ export default function App() {
         }]);
       }
       setGuidesLoaded(true);
+    }).catch(e => {
+      // Fail open: if storage is unreadable we still have to release the write
+      // gate, otherwise nothing this session would ever be persisted.
+      console.error("Failed to load saved guides", e);
+      setGuidesLoaded(true);
     });
 
     localforage.getItem("st_custom_templates").then((savedTemplatesData: any) => {
@@ -539,6 +548,9 @@ export default function App() {
           } catch (e) {}
         }
       }
+      setCustomTemplatesLoaded(true);
+    }).catch(e => {
+      console.error("Failed to load custom templates", e);
       setCustomTemplatesLoaded(true);
     });
 
@@ -558,10 +570,16 @@ export default function App() {
         }
       }
       setSavedCardsLoaded(true);
+    }).catch(e => {
+      console.error("Failed to load saved cards", e);
+      setSavedCardsLoaded(true);
     });
 
     localforage.getItem("st_saved_drafts").then((savedDraftsData: any) => {
       if (savedDraftsData) setSavedDrafts(savedDraftsData);
+      setSavedDraftsLoaded(true);
+    }).catch(e => {
+      console.error("Failed to load saved drafts", e);
       setSavedDraftsLoaded(true);
     });
 
@@ -599,11 +617,15 @@ export default function App() {
           if (typeof parsed.imageAspectRatio === "string") setImageAspectRatio(parsed.imageAspectRatio);
           if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
           if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
+          if (typeof parsed.forgeTokenLimit === "number") setForgeTokenLimit(parsed.forgeTokenLimit);
           if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
         } catch (e) {
           console.error("Failed to load app autosave", e);
         }
       }
+      setHasHydratedAutosave(true);
+    }).catch(e => {
+      console.error("Failed to load app autosave", e);
       setHasHydratedAutosave(true);
     });
   }, []);
@@ -765,6 +787,7 @@ export default function App() {
       imageAspectRatio,
       imageSize,
       imageStyle,
+      forgeTokenLimit,
       forgedCard,
       forgeBaseCard
     };
@@ -795,6 +818,7 @@ export default function App() {
     imageAspectRatio,
     imageSize,
     imageStyle,
+    forgeTokenLimit,
     forgedCard,
     forgeBaseCard
   ]);
@@ -1673,7 +1697,7 @@ export default function App() {
       if (template) {
         import("./lib/api").then(({ extractSlotsFromTemplate }) => {
           const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
-          extractSlotsFromTemplate(currentProvider, apiKeys, template.content, currentModel, template.example).then(slots => {
+          return extractSlotsFromTemplate(currentProvider, apiKeys, template.content, currentModel, template.example).then(slots => {
             setForgeSlots(prev => {
               const merged = slots.map(s => {
                 const existing = prev.find(p => p.name === s.name);
@@ -1681,9 +1705,14 @@ export default function App() {
               });
               return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
             });
-            setIsExtractingSlots(false);
           });
-        });
+        }).catch((err: any) => {
+          // Templates the regex cannot parse fall back to an AI call, which can
+          // reject. Without this the spinner would hang with no explanation.
+          console.error("Failed to extract slots from template", err);
+          setForgeError(`Could not read fields from this template: ${err?.message || err}`);
+          lastExtractedRef.current = { guide: "", template: "" };
+        }).finally(() => setIsExtractingSlots(false));
         return;
       }
     }
@@ -1700,8 +1729,11 @@ export default function App() {
             });
             return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
           });
-          setIsExtractingSlots(false);
-        });
+        }).catch((err: any) => {
+          console.error("Failed to extract slots from guide", err);
+          setForgeError(`Could not derive fields from this style guide: ${err?.message || err}`);
+          lastExtractedRef.current = { guide: "", template: "" };
+        }).finally(() => setIsExtractingSlots(false));
       } else {
         setIsExtractingSlots(false);
       }
@@ -2335,6 +2367,7 @@ export default function App() {
           scriptPrompt,
           imageAspectRatio,
           imageStyle,
+          forgeTokenLimit,
         });
       }
       alert("Draft saved successfully!");
@@ -3586,7 +3619,10 @@ export default function App() {
                               step={100}
                               placeholder="No limit"
                               value={forgeTokenLimit === 0 ? "" : forgeTokenLimit}
-                              onChange={(e) => setForgeTokenLimit(e.target.value === "" ? 0 : parseInt(e.target.value, 10) || 0)}
+                              onChange={(e) => {
+                                const n = parseInt(e.target.value, 10);
+                                setForgeTokenLimit(Number.isFinite(n) ? Math.max(0, n) : 0);
+                              }}
                               className="w-28 h-8 text-xs rounded-lg border-[#e5e4e2] bg-[#f9f8f6] focus-visible:ring-[#8B3A3A]/50"
                             />
                           </div>
