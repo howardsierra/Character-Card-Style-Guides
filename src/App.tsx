@@ -2377,10 +2377,10 @@ export default function App() {
         <div className="p-3 md:p-8 flex justify-between items-center md:block">
           <div className="flex justify-between items-center md:items-start w-full">
             <div>
-              <h1 className="text-xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
+              <h1 className="text-xl md:text-[2rem] md:leading-none font-serif font-bold text-[#8B3A3A] tracking-[-0.02em]">
                 StyleForge
               </h1>
-              <p className="hidden md:block text-xs font-medium tracking-widest uppercase text-slate-500 mt-2">
+              <p className="hidden md:block text-[10px] font-semibold tracking-[0.18em] uppercase text-slate-400 mt-2.5 whitespace-nowrap">
                 Authorial Voice Engine
               </p>
             </div>
@@ -2437,8 +2437,8 @@ export default function App() {
                   className="space-y-6 md:space-y-8"
                 >
                   <div className="space-y-2">
-                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Corpus Ingestion</h2>
-                    <p className="text-slate-500 text-base md:text-lg font-light">
+                    <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Corpus Ingestion</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                       Upload character cards to establish the authorial baseline. A minimum of 15 cards is recommended for accurate style extraction.
                     </p>
                   </div>
@@ -2575,8 +2575,8 @@ export default function App() {
                   className="space-y-6 md:space-y-8"
                 >
                   <div className="space-y-2">
-                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Fanfiction Distillery</h2>
-                    <p className="text-slate-500 text-base md:text-lg font-light">
+                    <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Fanfiction Distillery</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                       Upload an author's fanfiction and distill their prose into a writing style guide. Just one or two works per author is enough to capture a faithful voice profile.
                     </p>
                   </div>
@@ -2695,10 +2695,10 @@ export default function App() {
                 >
                   <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">
                         {currentGuideId ? guides.find(g => g.id === currentGuideId)?.title || "Style Guide" : "Style Guide"}
                       </h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light">
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                         {currentGuideId ? "Saved authorial profile." : "The synthesized authorial profile."}
                       </p>
                     </div>
@@ -2839,8 +2839,8 @@ export default function App() {
                 >
                   <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Library</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Library</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                         Archived style guides and synthesis history.
                       </p>
                     </div>
@@ -3036,8 +3036,8 @@ export default function App() {
                 >
                   <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Card Forge</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Card Forge</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                         Generate a new character card using a saved style guide.
                       </p>
                     </div>
@@ -4271,8 +4271,8 @@ export default function App() {
                 >
                   <div className="border-b border-[#e5e4e2] pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Universe Map</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Universe Map</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed mt-2">
                         Visualize character relationships and extract shared universes.
                       </p>
                     </div>
@@ -4396,8 +4396,8 @@ export default function App() {
                 >
                   <div className="border-b border-[#e5e4e2] pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Script Forge</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Script Forge</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed mt-2">
                         Build JanitorAI scripts and lorebooks.
                       </p>
                     </div>
@@ -4501,8 +4501,8 @@ export default function App() {
                   className="space-y-6 md:space-y-8 max-w-3xl"
                 >
                   <div className="border-b border-[#e5e4e2] pb-6">
-                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Configuration</h2>
-                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                    <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Configuration</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed mt-2">
                       Manage AI providers and API keys. Data is stored locally in your browser.
                     </p>
                   </div>
@@ -4512,22 +4512,28 @@ export default function App() {
                       <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         {(["gemini", "anthropic", "openrouter", "openrouter-responses", "openai", "openai-responses", "custom"] as AIProvider[]).map((p) => {
-                          let label = p as string;
-                          if (p === "openai-responses") label = "OpenAI (Responses)";
-                          else if (p === "openrouter") label = "OpenRouter";
-                          else if (p === "openrouter-responses") label = "OpenRouter (Resp)";
+                          const PROVIDER_LABELS: Record<string, string> = {
+                            "gemini": "Gemini",
+                            "anthropic": "Anthropic",
+                            "openrouter": "OpenRouter",
+                            "openrouter-responses": "OpenRouter (Responses)",
+                            "openai": "OpenAI",
+                            "openai-responses": "OpenAI (Responses)",
+                            "custom": "Custom",
+                          };
+                          const label = PROVIDER_LABELS[p as string] ?? (p as string);
                           return (
                           <div
                             key={p}
                             className={cn(
-                              "flex items-center justify-center rounded-xl border-2 p-4 cursor-pointer transition-all",
-                              provider === p 
-                                ? "border-[#8B3A3A] bg-[#8B3A3A]/5 text-[#8B3A3A]" 
-                                : "border-[#e5e4e2] bg-transparent hover:bg-[#f9f8f6] text-slate-600"
+                              "flex items-center justify-center rounded-xl border p-4 min-h-[64px] cursor-pointer transition-all duration-200 select-none active:scale-[0.98]",
+                              provider === p
+                                ? "border-[#8B3A3A] bg-[#8B3A3A]/5 text-[#8B3A3A] shadow-sm ring-1 ring-[#8B3A3A]/20"
+                                : "border-[#e5e4e2] bg-transparent hover:bg-[#f9f8f6] hover:border-[#d1d0ce] text-slate-600 hover:shadow-xs"
                             )}
                             onClick={() => setProvider(p)}
                           >
-                            <span className="font-medium capitalize tracking-wide">{label}</span>
+                            <span className="font-medium tracking-wide text-center text-sm leading-tight">{label}</span>
                           </div>
                         )})}
                       </div>
