@@ -7,6 +7,7 @@ import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Checkbox } from "./components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
+import { ToastViewport, useToasts } from "./components/ui/toast";
 import { cn } from "./lib/utils";
 import { CharacterCard, parseFile, parsePdfToText, parseDocxToText, parseFanficFile } from "./lib/parser";
 import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, generateStyleGuideFromFanfiction, FanficInput, suggestStyleCombination, StyleCombinationSuggestion, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
@@ -187,6 +188,7 @@ function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: strin
 
 export default function App() {
   const [user, loadingAuth] = useAuthState(auth);
+  const { toasts, notify, dismiss } = useToasts();
 
   const handleLogin = () => {
     signInWithPopup(auth, new GoogleAuthProvider()).catch((error) => console.error("Login failed", error));
@@ -416,11 +418,13 @@ export default function App() {
         
         await Promise.all(promises);
 
-        alert("Data imported successfully. The page will reload to apply changes.");
-        window.location.reload();
+        notify("Data imported successfully. The page will reload to apply changes.", "success");
+        // Toasts are non-blocking, unlike the alert() this replaced, so hold the
+        // reload long enough for the message to actually be read.
+        setTimeout(() => window.location.reload(), 1500);
       } catch (err) {
         console.error("Failed to import data", err);
-        alert("Failed to import data. Please ensure the file is a valid JSON backup.");
+        notify("Failed to import data. Please ensure the file is a valid JSON backup.");
       }
     };
     reader.readAsText(file);
@@ -442,10 +446,10 @@ export default function App() {
     });
 
     if (recoveredCount > 0) {
-      alert(`Found and recovered ${recoveredCount} items from browser legacy storage. Please reload the page.`);
-      window.location.reload();
+      notify(`Found and recovered ${recoveredCount} items from browser legacy storage. Reloading...`, "success");
+      setTimeout(() => window.location.reload(), 1500);
     } else {
-      alert("No legacy data found in browser storage.");
+      notify("No legacy data found in browser storage.");
     }
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -953,23 +957,23 @@ export default function App() {
         }
       } catch (err: any) {
         console.error("Failed to parse file", e.target.files[i].name, err);
-        alert(`Failed to parse file ${e.target.files[i].name}:\n${err?.message || err}`);
+        notify(`Failed to parse file ${e.target.files[i].name}:\n${err?.message || err}`);
       }
     }
     
     if (newCards.length > 0) {
       setCards((prev) => [...prev, ...newCards]);
-      alert(`Imported ${newCards.length} character card(s) to Corpus Ingestion!`);
+      notify(`Imported ${newCards.length} character card(s) to Corpus Ingestion!`);
     }
     
     if (newGuides.length > 0) {
       setGuides((prev) => [...newGuides, ...prev]);
-      alert(`Imported ${newGuides.length} style guide(s) to the Library!`);
+      notify(`Imported ${newGuides.length} style guide(s) to the Library!`);
       setView("saved");
     }
 
     if (newCards.length === 0 && newGuides.length === 0) {
-      alert("No valid character cards or style guides found in the uploaded files.");
+      notify("No valid character cards or style guides found in the uploaded files.");
     }
     
     setIsParsing(false);
@@ -986,7 +990,7 @@ export default function App() {
       try {
         const { title, text } = await parseFanficFile(file);
         if (!text || text.trim().length < 50) {
-          alert(`"${file.name}" produced little or no readable text. If it is a scanned PDF, try a text-based PDF or DOCX/TXT instead.`);
+          notify(`"${file.name}" produced little or no readable text. If it is a scanned PDF, try a text-based PDF or DOCX/TXT instead.`);
           continue;
         }
         newFics.push({
@@ -997,7 +1001,7 @@ export default function App() {
         });
       } catch (err: any) {
         console.error("Failed to parse fanfic", file.name, err);
-        alert(`Failed to parse ${file.name}:\n${err?.message || err}`);
+        notify(`Failed to parse ${file.name}:\n${err?.message || err}`);
       }
     }
 
@@ -1032,7 +1036,7 @@ export default function App() {
       setShowVersions(false);
     } catch (err) {
       console.error(err);
-      alert("Failed to generate guide from fanfiction. Check console for details.");
+      notify("Failed to generate guide from fanfiction. Check console for details.");
     } finally {
       setIsGenerating(false);
     }
@@ -1153,7 +1157,7 @@ export default function App() {
 
   const saveTemplate = () => {
     if (!editingTemplateName.trim() || !editingTemplateContent.trim()) {
-      alert("Template name and content are required.");
+      notify("Template name and content are required.");
       return;
     }
 
@@ -1241,10 +1245,10 @@ export default function App() {
       setSuggestedSong(null);
       setForgeSlots(prev => applyCardToSlots(prev, uploadedCard));
       setView("create");
-      alert("Base card loaded into Card Forge. Choose a style guide/template and use AI tools to alternate it.");
+      notify("Base card loaded into Card Forge. Choose a style guide/template and use AI tools to alternate it.");
     } catch (err) {
       console.error(err);
-      alert("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
+      notify("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
     } finally {
       e.target.value = "";
     }
@@ -1297,7 +1301,7 @@ export default function App() {
       setView("generate");
     } catch (err) {
       console.error(err);
-      alert("Failed to generate guide. Check console for details.");
+      notify("Failed to generate guide. Check console for details.");
     } finally {
       setIsGenerating(false);
     }
@@ -1321,7 +1325,7 @@ export default function App() {
       setSelectedGuides(new Set());
     } catch (err) {
       console.error(err);
-      alert("Failed to merge guides. Check console for details.");
+      notify("Failed to merge guides. Check console for details.");
     } finally {
       setIsGenerating(false);
     }
@@ -1348,7 +1352,7 @@ export default function App() {
       setCombinationSuggestion(result);
     } catch (err: any) {
       console.error(err);
-      alert("Failed to analyze combination: " + (err.message || err));
+      notify("Failed to analyze combination: " + (err.message || err));
     } finally {
       setIsSuggestingCombination(false);
     }
@@ -1370,7 +1374,7 @@ export default function App() {
     };
     setGuides((prev) => [newGuide, ...prev]);
     setCurrentGuideId(newGuide.id);
-    alert("Guide saved!");
+    notify("Guide saved!");
   };
 
   const updateCurrentGuide = () => {
@@ -1393,7 +1397,7 @@ export default function App() {
     }));
     setCurrentGuide(editedGuideContent);
     setIsEditingGuide(false);
-    alert("Guide updated!");
+    notify("Guide updated!");
   };
 
   const revertToVersion = (version: GuideVersion) => {
@@ -1416,7 +1420,7 @@ export default function App() {
     }));
     setCurrentGuide(version.content);
     setShowVersions(false);
-    alert("Reverted to previous version!");
+    notify("Reverted to previous version!");
   };
 
   const exportPDF = async () => {
@@ -1609,7 +1613,7 @@ export default function App() {
       doc.save(filename);
     } catch (err) {
       console.error("Failed to export PDF:", err);
-      alert("Failed to export PDF. Please try again.");
+      notify("Failed to export PDF. Please try again.");
     }
   };
 
@@ -1797,7 +1801,7 @@ export default function App() {
       setGeneratedScript(result);
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate script: " + err.message);
+      notify("Failed to generate script: " + err.message);
     } finally {
       setIsGeneratingScript(false);
     }
@@ -1818,7 +1822,7 @@ export default function App() {
       setUniverseData(data);
     } catch (err) {
       console.error(err);
-      alert("Failed to extract universe data.");
+      notify("Failed to extract universe data.");
     } finally {
       setIsExtractingUniverse(false);
     }
@@ -1898,7 +1902,7 @@ export default function App() {
       setImagePrompt(prompt);
     } catch (err) {
       console.error(err);
-      alert("Failed to generate image prompt.");
+      notify("Failed to generate image prompt.");
     } finally {
       setIsGeneratingImagePrompt(false);
     }
@@ -1914,7 +1918,7 @@ export default function App() {
       setSuggestedSong(song);
     } catch (err) {
       console.error(err);
-      alert("Failed to suggest theme song.");
+      notify("Failed to suggest theme song.");
     } finally {
       setIsSuggestingSong(false);
     }
@@ -1945,7 +1949,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate greeting: " + (err.message || err));
+      notify("Failed to generate greeting: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsGeneratingGreeting(false);
@@ -1960,7 +1964,7 @@ export default function App() {
       setStudioUploadedCard(card);
     } catch (err) {
       console.error(err);
-      alert("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
+      notify("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
     }
     e.target.value = "";
   };
@@ -1970,11 +1974,11 @@ export default function App() {
       ? savedCards.find(c => c.id === studioSelectedCardId)?.card
       : studioUploadedCard;
     if (!card) {
-      alert(studioCardSource === "saved" ? "Please select a saved card first." : "Please upload a card first.");
+      notify(studioCardSource === "saved" ? "Please select a saved card first." : "Please upload a card first.");
       return;
     }
     if (!studioVibePrompt.trim()) {
-      alert("Please describe what you want the new greeting to be about.");
+      notify("Please describe what you want the new greeting to be about.");
       return;
     }
     setIsStudioGenerating(true);
@@ -1998,7 +2002,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate greeting: " + (err.message || err));
+      notify("Failed to generate greeting: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsStudioGenerating(false);
@@ -2021,21 +2025,21 @@ export default function App() {
       setStudioUploadedCard(updated);
     }
     setStudioGeneratedGreeting("");
-    alert("Greeting added to card!");
+    notify("Greeting added to card!");
   };
 
   const handleAdaptCard = async () => {
     if (!adaptRawText.trim()) {
-      alert("Please paste your card text first.");
+      notify("Please paste your card text first.");
       return;
     }
     if (!adaptSelectedGuide) {
-      alert("Please select a style guide to adapt the card to.");
+      notify("Please select a style guide to adapt the card to.");
       return;
     }
     const guide = guides.find(g => g.id === adaptSelectedGuide);
     if (!guide) {
-      alert("Selected style guide not found.");
+      notify("Selected style guide not found.");
       return;
     }
     setIsAdapting(true);
@@ -2056,7 +2060,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to adapt card: " + (err.message || err));
+      notify("Failed to adapt card: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsAdapting(false);
@@ -2098,7 +2102,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate greeting: " + (err.message || err));
+      notify("Failed to generate greeting: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsAdapting(false);
@@ -2134,7 +2138,7 @@ export default function App() {
 
   const handleGenerateSlot = async (index: number) => {
     if (!forgeSelectedGuide) {
-      alert("Please select a style guide first to generate slot content.");
+      notify("Please select a style guide first to generate slot content.");
       return;
     }
     const guide = guides.find(g => g.id === forgeSelectedGuide);
@@ -2180,7 +2184,7 @@ export default function App() {
       });
     } catch (err: any) {
       console.error(err);
-      alert(`Failed to generate slot content: ${err?.message || "Unknown error"}`);
+      notify(`Failed to generate slot content: ${err?.message || "Unknown error"}`);
     } finally {
       setGeneratingSlotIndex(null);
     }
@@ -2220,11 +2224,11 @@ export default function App() {
 
   const handleVibeForge = async () => {
     if (!vibePrompt.trim()) {
-      alert("Please enter a vibe or description first.");
+      notify("Please enter a vibe or description first.");
       return;
     }
     if (!forgeSelectedGuide) {
-      alert("Please select a Style Guide first.");
+      notify("Please select a Style Guide first.");
       return;
     }
     setIsVibeForging(true);
@@ -2273,7 +2277,7 @@ export default function App() {
 
   const handleAutoFill = async () => {
     if (!forgeName || !forgeConcept) {
-      alert("Please provide a Name and Core Concept first.");
+      notify("Please provide a Name and Core Concept first.");
       return;
     }
     setIsAutoFilling(true);
@@ -2293,7 +2297,7 @@ export default function App() {
       }));
     } catch (err) {
       console.error(err);
-      alert("Failed to auto-fill slots.");
+      notify("Failed to auto-fill slots.");
     } finally {
       setIsAutoFilling(false);
     }
@@ -2335,7 +2339,7 @@ export default function App() {
       date: new Date().toISOString(),
     };
     setSavedCards(prev => [...prev, newSavedCard]);
-    alert("Card saved to library!");
+    notify("Card saved to library!");
   };
 
   const handleSaveDraft = async (section: string) => {
@@ -2370,10 +2374,10 @@ export default function App() {
           forgeTokenLimit,
         });
       }
-      alert("Draft saved successfully!");
+      notify("Draft saved successfully!");
     } catch (e) {
       console.error("Failed to save draft", e);
-      alert("Failed to save draft.");
+      notify("Failed to save draft.");
     }
   };
 
@@ -4498,7 +4502,7 @@ export default function App() {
                             size="sm"
                             onClick={() => {
                               navigator.clipboard.writeText(generatedScript);
-                              alert("Script copied to clipboard!");
+                              notify("Script copied to clipboard!");
                             }}
                             className="h-8 rounded-lg"
                           >
@@ -5051,6 +5055,8 @@ export default function App() {
           </div>
         </ScrollArea>
       </div>
+
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
 
       {/* Mobile Bottom Nav */}
       <div className="md:hidden flex-none border-t border-[#e5e4e2] bg-[#f9f8f6]/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)] z-30 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
