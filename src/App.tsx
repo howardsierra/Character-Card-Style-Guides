@@ -22,11 +22,10 @@ import { ModelSelector } from "./components/ModelSelector";
 import { useHistory } from "./hooks/useHistory";
 import localforage from "localforage";
 
-// Firebase Imports
-import { auth, db, handleFirestoreError, OperationType } from "./lib/firebase";
-import { signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
-import { useAuthState } from "react-firebase-hooks/auth";
-import { collection, doc, getDocs, setDoc, deleteDoc, query, onSnapshot, writeBatch, serverTimestamp, getDoc } from "firebase/firestore";
+// Firebase is loaded on demand; nothing here pulls the SDK into the main chunk.
+import { handleFirestoreError, OperationType } from "./lib/firebase";
+import { fetchCollection, writeDoc, removeDoc, signInWithGoogle, signOutOfFirebase } from "./lib/firebaseSync";
+import { useFirebaseAuth } from "./hooks/useFirebaseAuth";
 
 function ConfiguredModelSelector(props: Omit<React.ComponentProps<typeof ModelSelector>, 'customEndpoints'> & { apiKeys: ApiKeys }) {
   return <ModelSelector {...props} customEndpoints={props.apiKeys.customEndpoints} />;
@@ -187,14 +186,17 @@ function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: strin
 }
 
 export default function App() {
-  const [user, loadingAuth] = useAuthState(auth);
+  const [user, loadingAuth, ensureAuth] = useFirebaseAuth();
   const { toasts, notify, dismiss } = useToasts();
 
   const handleLogin = () => {
-    signInWithPopup(auth, new GoogleAuthProvider()).catch((error) => console.error("Login failed", error));
+    // Bring the auth subscription up before the popup, so the resulting sign-in
+    // is observed even on a browser that had never signed in before.
+    ensureAuth();
+    signInWithGoogle().catch((error) => console.error("Login failed", error));
   };
   const handleLogout = () => {
-    signOut(auth);
+    signOutOfFirebase().catch((error) => console.error("Logout failed", error));
   };
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -637,64 +639,43 @@ export default function App() {
   // Firebase Sync
   useEffect(() => {
     if (!user) return;
+    const uid = user.uid;
+
+    // Same shape four times over: adopt the cloud copy if it exists, otherwise
+    // seed the cloud from whatever this device already has.
+    const collections: { name: string; local: any[]; apply: (rows: any[]) => void }[] = [
+      { name: "style_guides", local: guides, apply: setGuides },
+      { name: "saved_cards", local: savedCards, apply: setSavedCards },
+      { name: "custom_templates", local: customTemplates, apply: setCustomTemplates },
+      { name: "character_drafts", local: savedDrafts, apply: setSavedDrafts },
+    ];
+
     const fetchFromFirebase = async () => {
-      try {
-        const guidesSnap = await getDocs(collection(db, "users", user.uid, "style_guides"));
-        const cardsSnap = await getDocs(collection(db, "users", user.uid, "saved_cards"));
-        const templatesSnap = await getDocs(collection(db, "users", user.uid, "custom_templates"));
-        const draftsSnap = await getDocs(collection(db, "users", user.uid, "character_drafts"));
-        
-        let fbGuides: any[] = [];
-        guidesSnap.forEach(doc => fbGuides.push(doc.data()));
-        
-        let fbCards: any[] = [];
-        cardsSnap.forEach(doc => fbCards.push(doc.data()));
-        
-        let fbTemplates: any[] = [];
-        templatesSnap.forEach(doc => fbTemplates.push(doc.data()));
-        
-        let fbDrafts: any[] = [];
-        draftsSnap.forEach(doc => fbDrafts.push(doc.data()));
+      for (const { name, local, apply } of collections) {
+        try {
+          const remote = await fetchCollection(uid, name);
+          if (remote.length > 0) {
+            apply(remote);
+            continue;
+          }
 
-        // If Firebase has data, use it. If not, maybe upload existing local data?
-        if (fbGuides.length > 0) setGuides(fbGuides);
-        else if (guides.length > 0) {
-          guides.forEach(async (g) => {
-            try {
-              if (g.id) await setDoc(doc(db, "users", user.uid, "style_guides", g.id), { ...g, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "style_guides"); }
-          });
+          const now = Date.now();
+          // allSettled so one rejected write does not abandon the rest; note
+          // handleFirestoreError rethrows, which is what surfaces here.
+          const results = await Promise.allSettled(
+            local
+              .filter((row) => row.id)
+              .map((row) =>
+                writeDoc(uid, name, row.id, { ...row, userId: uid, createdAt: now, updatedAt: now })
+                  .catch((e) => handleFirestoreError(e, OperationType.CREATE, name))
+              )
+          );
+          for (const r of results) {
+            if (r.status === "rejected") console.error(`Failed to seed ${name}`, r.reason);
+          }
+        } catch (e) {
+          console.error(`Firebase sync error for ${name}`, e);
         }
-        
-        if (fbCards.length > 0) setSavedCards(fbCards);
-        else if (savedCards.length > 0) {
-          savedCards.forEach(async (c) => {
-            try {
-              if (c.id) await setDoc(doc(db, "users", user.uid, "saved_cards", c.id), { ...c, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "saved_cards"); }
-          });
-        }
-        
-        if (fbTemplates.length > 0) setCustomTemplates(fbTemplates);
-        else if (customTemplates.length > 0) {
-          customTemplates.forEach(async (t) => {
-            try {
-              if (t.id) await setDoc(doc(db, "users", user.uid, "custom_templates", t.id), { ...t, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "custom_templates"); }
-          });
-        }
-        
-        if (fbDrafts.length > 0) setSavedDrafts(fbDrafts);
-        else if (savedDrafts.length > 0) {
-          savedDrafts.forEach(async (d) => {
-            try {
-              if (d.id) await setDoc(doc(db, "users", user.uid, "character_drafts", d.id), { ...d, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "character_drafts"); }
-          });
-        }
-
-      } catch (e) {
-        console.error("Firebase sync error", e);
       }
     };
     fetchFromFirebase();
@@ -706,7 +687,7 @@ export default function App() {
     guides.forEach(async (g) => {
       if (g.id) {
         try {
-          await setDoc(doc(db, "users", user.uid, "style_guides", g.id), { ...g, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+          await writeDoc(user.uid, "style_guides", g.id, { ...g, userId: user.uid, updatedAt: Date.now() }, { merge: true });
         } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "style_guides"); }
       }
     });
@@ -717,7 +698,7 @@ export default function App() {
     savedCards.forEach(async (c) => {
       if (c.id) {
         try {
-          await setDoc(doc(db, "users", user.uid, "saved_cards", c.id), { ...c, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+          await writeDoc(user.uid, "saved_cards", c.id, { ...c, userId: user.uid, updatedAt: Date.now() }, { merge: true });
         } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "saved_cards"); }
       }
     });
@@ -728,7 +709,7 @@ export default function App() {
     customTemplates.forEach(async (t) => {
       if (t.id) {
         try {
-          await setDoc(doc(db, "users", user.uid, "custom_templates", t.id), { ...t, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+          await writeDoc(user.uid, "custom_templates", t.id, { ...t, userId: user.uid, updatedAt: Date.now() }, { merge: true });
         } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "custom_templates"); }
       }
     });
@@ -797,7 +778,7 @@ export default function App() {
     };
     localforage.setItem(APP_AUTOSAVE_KEY, appState).catch(e => console.error(e));
     if (user) {
-      setDoc(doc(db, "users", user.uid, "app_state", "autosave"), { ...appState, userId: user.uid, updatedAt: Date.now() }).catch(err => {
+      writeDoc(user.uid, "app_state", "autosave", { ...appState, userId: user.uid, updatedAt: Date.now() }).catch(err => {
         // We log it but do not throw to avoid spamming the console on every typed character
         console.warn("Autosave Firebase sync error", err);
       });
@@ -1187,7 +1168,7 @@ export default function App() {
     if (confirm("Are you sure you want to delete this custom template?")) {
       setCustomTemplates(prev => prev.filter(t => t.id !== id));
       if (user) {
-        deleteDoc(doc(db, "users", user.uid, "custom_templates", id)).catch(e => handleFirestoreError(e, OperationType.DELETE, "custom_templates"));
+        removeDoc(user.uid, "custom_templates", id).catch(e => handleFirestoreError(e, OperationType.DELETE, "custom_templates"));
       }
       if (forgeSelectedTemplate === id) {
         setForgeSelectedTemplate("");
@@ -1647,7 +1628,7 @@ export default function App() {
   const deleteGuide = (id: string) => {
     setGuides((prev) => prev.filter((g) => g.id !== id));
     if (user) {
-      deleteDoc(doc(db, "users", user.uid, "style_guides", id)).catch(e => handleFirestoreError(e, OperationType.DELETE, "style_guides"));
+      removeDoc(user.uid, "style_guides", id).catch(e => handleFirestoreError(e, OperationType.DELETE, "style_guides"));
     }
     const newSet = new Set(selectedGuides);
     newSet.delete(id);
@@ -3126,7 +3107,7 @@ export default function App() {
                                       if (confirm("Delete this draft?")) {
                                         setSavedDrafts(prev => prev.filter(d => d.id !== draft.id));
                                         if (user) {
-                                          deleteDoc(doc(db, "users", user.uid, "character_drafts", draft.id)).catch(err => handleFirestoreError(err, OperationType.DELETE, "character_drafts"));
+                                          removeDoc(user.uid, "character_drafts", draft.id).catch(err => handleFirestoreError(err, OperationType.DELETE, "character_drafts"));
                                         }
                                       }
                                     }}
@@ -3199,7 +3180,7 @@ export default function App() {
                                     if (confirm("Are you sure you want to delete this saved card?")) {
                                       setSavedCards(prev => prev.filter(c => c.id !== saved.id));
                                       if (user) {
-                                        deleteDoc(doc(db, "users", user.uid, "saved_cards", saved.id)).catch(err => handleFirestoreError(err, OperationType.DELETE, "saved_cards"));
+                                        removeDoc(user.uid, "saved_cards", saved.id).catch(err => handleFirestoreError(err, OperationType.DELETE, "saved_cards"));
                                       }
                                     }
                                   }}
