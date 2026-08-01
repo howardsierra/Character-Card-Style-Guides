@@ -66,6 +66,39 @@ export function parseJsonRobust(text: string): any {
   return JSON.parse(jsonrepair(cleanText));
 }
 
+/**
+ * Parse a model reply that is expected to be a JSON *object*.
+ *
+ * parseJsonRobust alone is not enough: jsonrepair turns bare prose ("I can't
+ * help with that") into a valid JSON string literal, so parsing succeeds and a
+ * string flows onward. Callers then read `.name` / `.slots` / `.nodes` off it
+ * and either render blank fields or throw an opaque "cannot read properties of
+ * undefined" — sometimes mid-render, which takes the whole app down.
+ *
+ * @param what human-readable subject, used to prefix the thrown message
+ * @param requiredKeys if given, the object must carry at least one of them
+ */
+export function parseJsonObject(text: string, what: string, requiredKeys: string[] = []): any {
+  let parsed: any;
+  try {
+    parsed = parseJsonRobust(text);
+  } catch (e: any) {
+    console.error(`${what}: failed to parse as JSON:`, text);
+    throw new Error(`${what}: the model did not return valid JSON (${e.message})`);
+  }
+
+  const isObject = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+  const hasRequiredKey = isObject && (requiredKeys.length === 0 || requiredKeys.some(k => k in parsed));
+
+  if (!isObject || !hasRequiredKey) {
+    console.error(`${what}: parsed, but not the expected shape:`, parsed);
+    const preview = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+    throw new Error(`${what}: the model replied with something else — ${String(preview).substring(0, 200)}`);
+  }
+
+  return parsed;
+}
+
 function isUnsupportedMaxCompletionError(errMsg: string): boolean {
   const normalized = errMsg.toLowerCase();
   return normalized.includes("max_completion_tokens") &&
@@ -916,36 +949,8 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
 
   const CARD_KEYS = ["name", "description", "personality", "scenario", "first_mes", "mes_example"];
 
-  const parseResponse = (text: string): CharacterCard => {
-    let parsed: any;
-    try {
-      parsed = parseJsonRobust(text);
-    } catch (e: any) {
-      console.error("Failed to parse AI response as JSON:", text);
-      console.error("Parse error:", e);
-      throw new Error(`AI did not return valid JSON: ${e.message}`);
-    }
-
-    // jsonrepair happily turns bare prose ("I can't help with that") into a
-    // JSON string literal, so parsing succeeds and we get a string back. Without
-    // this guard that string reaches the UI as a card and every field renders
-    // blank with no error shown.
-    const isCardShaped =
-      parsed !== null &&
-      typeof parsed === "object" &&
-      !Array.isArray(parsed) &&
-      CARD_KEYS.some(k => k in parsed);
-
-    if (!isCardShaped) {
-      console.error("AI response parsed but is not a character card:", parsed);
-      const preview = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
-      throw new Error(
-        `AI did not return a character card. It replied: ${String(preview).substring(0, 200)}`
-      );
-    }
-
-    return parsed as CharacterCard;
-  };
+  const parseResponse = (text: string): CharacterCard =>
+    parseJsonObject(text, "AI did not return a character card", CARD_KEYS) as CharacterCard;
 
   let responseText: string;
   if (onChunk) {
@@ -1231,10 +1236,15 @@ ${styleGuide || "No style guide provided. Rely entirely on the character cards a
 
   const parseResponse = (text: string): UniverseData => {
     try {
-      return parseJsonRobust(text);
+      const parsed = parseJsonObject(text, "Failed to map the universe", ["nodes", "links"]);
+      // The map renders universeData.nodes.length during render, so a missing
+      // array here would throw mid-render and white-screen the app.
+      return {
+        nodes: Array.isArray(parsed.nodes) ? parsed.nodes : [],
+        links: Array.isArray(parsed.links) ? parsed.links : [],
+      };
     } catch (e: any) {
-      console.error("Failed to parse AI response as JSON:", text);
-      console.error("Parse error:", e);
+      console.error("Failed to parse universe response:", text, e);
       return { nodes: [], links: [] };
     }
   };
@@ -1319,13 +1329,9 @@ ${slotsPrompt}
     );
   }
   
-  try {
-    return parseJsonRobust(response);
-  } catch (e: any) {
-    console.error("Failed to parse vibe forge JSON:", response);
-    console.error("Parse error:", e);
-    throw new Error(`Failed to parse generated character details: ${e.message}`);
-  }
+  // The caller indexes result.slots directly, so an object is not optional here.
+  const parsed = parseJsonObject(response, "Failed to generate character details", ["name", "concept", "slots"]);
+  return { ...parsed, slots: parsed.slots ?? {} };
 }
 
 export async function autoFillSlots(
@@ -1629,7 +1635,9 @@ Do not add any markdown blocks around the JSON.`;
   );
 
   try {
-    const parsed = parseJsonRobust(responseText);
+    const parsed = parseJsonObject(responseText, 'Failed to adapt the card', [
+      'name', 'description', 'personality', 'scenario', 'first_mes', 'mes_example',
+    ]);
     return {
       name: parsed.name || 'Adapted Character',
       description: parsed.description || '',
