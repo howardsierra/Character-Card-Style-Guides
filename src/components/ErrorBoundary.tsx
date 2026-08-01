@@ -30,8 +30,8 @@ export class ErrorBoundary extends Component<Props, State> {
     if (!error) return this.props.children;
 
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#f9f8f6] p-6">
-        <div className="w-full max-w-lg rounded-3xl border border-[#e5e4e2] bg-white p-8 shadow-lg">
+      <div className="flex min-h-screen items-center justify-center bg-background p-6">
+        <div className="w-full max-w-lg rounded-3xl border border-border bg-card p-8 shadow-lg">
           <h1 className="mb-3 font-serif text-3xl font-light tracking-tight text-slate-900">
             Something broke
           </h1>
@@ -40,20 +40,20 @@ export class ErrorBoundary extends Component<Props, State> {
             stored separately and should still be intact after reloading.
           </p>
 
-          <pre className="mb-6 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] p-4 font-mono text-xs text-slate-600">
+          <pre className="mb-6 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl border border-border bg-background p-4 font-mono text-xs text-slate-600">
             {error.message || String(error)}
           </pre>
 
           <div className="flex flex-wrap gap-3">
             <button
               onClick={() => window.location.reload()}
-              className="rounded-xl bg-[#8B3A3A] px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:brightness-110 active:scale-[0.98]"
+              className="rounded-xl bg-primary-solid px-5 py-2.5 text-sm font-medium text-white shadow-sm transition-all hover:brightness-110 active:scale-[0.98]"
             >
               Reload the page
             </button>
             <button
               onClick={() => this.setState({ error: null })}
-              className="rounded-xl border border-[#e5e4e2] px-5 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-[#f9f8f6]"
+              className="rounded-xl border border-border px-5 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-background"
             >
               Try to continue
             </button>

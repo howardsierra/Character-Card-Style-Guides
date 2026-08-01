@@ -55,7 +55,7 @@ export function useToasts() {
 const VARIANT_STYLES: Record<ToastVariant, { icon: typeof Info; accent: string; ring: string }> = {
   error: { icon: AlertTriangle, accent: "text-destructive", ring: "ring-destructive/25" },
   success: { icon: CheckCircle2, accent: "text-emerald-600", ring: "ring-emerald-500/25" },
-  info: { icon: Info, accent: "text-[#8B3A3A]", ring: "ring-[#8B3A3A]/20" },
+  info: { icon: Info, accent: "text-primary", ring: "ring-primary/20" },
 };
 
 export function ToastViewport({
@@ -83,7 +83,7 @@ export function ToastViewport({
               exit={{ opacity: 0, y: 8, scale: 0.97 }}
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
               className={cn(
-                "pointer-events-auto w-full max-w-md sm:w-[26rem] rounded-2xl border border-[#e5e4e2] bg-white shadow-lg ring-1",
+                "pointer-events-auto w-full max-w-md sm:w-[26rem] rounded-2xl border border-border bg-card shadow-lg ring-1",
                 ring
               )}
             >

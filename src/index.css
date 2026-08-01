@@ -1,6 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400;1,600&family=Inter:wght@300;400;500;600;700&display=swap');
-@import "tailwindcss";
+@import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
+
+/* Scan only the real app. Automatic detection also picks up tmp_repo/ (a stale
+   duplicate checkout) and the scratch .txt files at the repo root, which still
+   contain the pre-migration hex classes and would otherwise emit dead rules
+   into the production bundle. */
+@source "./**/*.{ts,tsx}";
+@source "../index.html";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
@@ -12,7 +19,11 @@
      the accent must lighten for text but a button fill must stay dark enough
      to carry white type. */
   --color-primary-solid: var(--primary-solid);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
+  /* One step above --card. In dark mode a selected surface sitting directly on
+     --card is indistinguishable from the --muted strip behind it. */
+  --color-surface-raised: var(--surface-raised);
   --color-background: var(--background);
   --color-foreground: var(--card-foreground);
   --color-card: var(--card);
@@ -50,6 +61,7 @@
 
   --background: #faf8f5;
   --card: #ffffff;
+  --surface-raised: #ffffff;
   --card-foreground: #1c1917;
 
   --border: #e7e3dc;
@@ -90,6 +102,7 @@
 
   --background: #131110;
   --card: #1c1a17;
+  --surface-raised: #2e2b28;
   --card-foreground: #f3f0ec;
 
   --border: #322e29;
@@ -169,53 +182,9 @@ input[type="number"],
 }
 
 /* ---------------------------------------------------------------------------
-   Brand hex → token bridge.
-   App.tsx pins brand colours as literal hexes in hundreds of places. Mapping
-   those literals onto the CSS variables lets both themes be driven entirely
-   from the token block above, instead of duplicating every rule under `.dark`.
-   --------------------------------------------------------------------------- */
-.bg-\[\#f9f8f6\] { background-color: var(--background) !important; }
-/* Translucent variant backs the sticky mobile nav — without this it stays cream */
-.bg-\[\#f9f8f6\]\/95 { background-color: color-mix(in srgb, var(--background) 95%, transparent) !important; }
-.bg-\[\#f0efe9\] { background-color: var(--muted) !important; }
-.border-\[\#e5e4e2\] { border-color: var(--border) !important; }
-.border-\[\#e5e4e2\]\/50 { border-color: color-mix(in srgb, var(--border) 55%, transparent) !important; }
-.border-\[\#e5e4e2\]\/80 { border-color: color-mix(in srgb, var(--border) 85%, transparent) !important; }
-.border-\[\#d1d0ce\] { border-color: color-mix(in srgb, var(--border) 100%, #000 8%) !important; }
-
-.text-\[\#8B3A3A\] { color: var(--primary) !important; }
-.hover\:text-\[\#8B3A3A\]:hover { color: var(--primary) !important; }
-.bg-\[\#8B3A3A\] { background-color: var(--primary-solid) !important; }
-.hover\:bg-\[\#8B3A3A\]:hover { background-color: var(--primary-solid) !important; }
-.border-\[\#8B3A3A\] { border-color: var(--primary) !important; }
-.bg-\[\#7a3333\], .hover\:bg-\[\#7a3333\]:hover { background-color: var(--primary-hover) !important; }
-
-.bg-\[\#8B3A3A\]\/5 { background-color: color-mix(in srgb, var(--primary) 6%, transparent) !important; }
-.bg-\[\#8B3A3A\]\/10, .hover\:bg-\[\#8B3A3A\]\/10:hover { background-color: color-mix(in srgb, var(--primary) 11%, transparent) !important; }
-.border-\[\#8B3A3A\]\/20 { border-color: color-mix(in srgb, var(--primary) 22%, transparent) !important; }
-.border-\[\#8B3A3A\]\/30 { border-color: color-mix(in srgb, var(--primary) 32%, transparent) !important; }
-.ring-\[\#8B3A3A\]\/20 { --tw-ring-color: color-mix(in srgb, var(--primary) 22%, transparent) !important; }
-.shadow-\[\#8B3A3A\]\/20 { --tw-shadow-color: color-mix(in srgb, var(--primary) 22%, transparent) !important; }
-
-.focus-visible\:ring-\[\#8B3A3A\]:focus-visible,
-.ring-\[\#8B3A3A\] { --tw-ring-color: var(--primary) !important; }
-.focus-visible\:ring-\[\#8B3A3A\]\/50:focus-visible { --tw-ring-color: color-mix(in srgb, var(--primary) 50%, transparent) !important; }
-.focus-visible\:border-\[\#8B3A3A\]:focus-visible { border-color: var(--primary) !important; }
-
-.from-\[\#8B3A3A\]\/20 { --tw-gradient-from: color-mix(in srgb, var(--primary) 22%, transparent) !important; }
-.via-\[\#8B3A3A\] { --tw-gradient-via: var(--primary) !important; }
-.to-\[\#8B3A3A\]\/20 { --tw-gradient-to: color-mix(in srgb, var(--primary) 22%, transparent) !important; }
-
-/* ---------------------------------------------------------------------------
    Dark theme: remap the cool slate ramp onto a warm greige ramp so text and
    surfaces stay in the same family as the burgundy accent.
    --------------------------------------------------------------------------- */
-.dark .bg-white { background-color: var(--card) !important; }
-.dark .bg-white\/50 { background-color: color-mix(in srgb, var(--card) 55%, transparent) !important; }
-.dark .bg-white\/80 { background-color: color-mix(in srgb, var(--card) 82%, transparent) !important; }
-.dark .bg-white\/90 { background-color: color-mix(in srgb, var(--card) 92%, transparent) !important; }
-.dark .hover\:bg-white:hover { background-color: var(--muted) !important; }
-.dark .hover\:bg-white\/50:hover { background-color: color-mix(in srgb, var(--muted) 55%, transparent) !important; }
 
 .dark .text-slate-900, .dark .hover\:text-slate-900:hover { color: var(--card-foreground) !important; }
 .dark .text-slate-800 { color: #e7e2db !important; }
@@ -289,24 +258,6 @@ input[type="number"],
 .dark .prose-p\:text-slate-700 p,
 .dark .prose-li\:text-slate-700 li { color: #d2ccc3 !important; }
 .dark .prose-strong\:text-slate-900 strong { color: var(--card-foreground) !important; }
-.dark .prose-h1\:text-\[\#8B3A3A\] h1,
-.dark .prose-h2\:text-\[\#8B3A3A\] h2 { color: var(--primary) !important; }
-.dark .prose-h2\:border-\[\#e5e4e2\] h2 { border-color: var(--border) !important; }
-
-/* ---------------------------------------------------------------------------
-   Variant-prefixed literals the hex bridge above cannot reach. Tailwind emits
-   these as distinct class names (`.focus\:bg-white`, not `.bg-white`), so they
-   would otherwise flash pure white against the dark ground.
-   --------------------------------------------------------------------------- */
-/* Lifted above --card so the selected tab separates from the tab strip,
-   which itself sits on --muted and would otherwise be the same value. */
-.dark .data-\[state\=active\]\:bg-white[data-state="active"] {
-  background-color: color-mix(in srgb, var(--card), #ffffff 10%) !important;
-}
-.dark .focus\:bg-white:focus { background-color: var(--card) !important; }
-@media (min-width: 768px) {
-  .dark .md\:bg-white { background-color: var(--card) !important; }
-}
 
 /* ---------------------------------------------------------------------------
    Native selects: strip the OS chrome and supply a chevron that tracks theme.
