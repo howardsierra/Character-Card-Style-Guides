@@ -914,14 +914,37 @@ IMPORTANT: Ensure all string values are properly escaped for JSON. Use \\n for n
   "mes_example": "string"
 }`;
 
+  const CARD_KEYS = ["name", "description", "personality", "scenario", "first_mes", "mes_example"];
+
   const parseResponse = (text: string): CharacterCard => {
+    let parsed: any;
     try {
-      return parseJsonRobust(text);
+      parsed = parseJsonRobust(text);
     } catch (e: any) {
       console.error("Failed to parse AI response as JSON:", text);
       console.error("Parse error:", e);
       throw new Error(`AI did not return valid JSON: ${e.message}`);
     }
+
+    // jsonrepair happily turns bare prose ("I can't help with that") into a
+    // JSON string literal, so parsing succeeds and we get a string back. Without
+    // this guard that string reaches the UI as a card and every field renders
+    // blank with no error shown.
+    const isCardShaped =
+      parsed !== null &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      CARD_KEYS.some(k => k in parsed);
+
+    if (!isCardShaped) {
+      console.error("AI response parsed but is not a character card:", parsed);
+      const preview = typeof parsed === "string" ? parsed : JSON.stringify(parsed);
+      throw new Error(
+        `AI did not return a character card. It replied: ${String(preview).substring(0, 200)}`
+      );
+    }
+
+    return parsed as CharacterCard;
   };
 
   let responseText: string;
