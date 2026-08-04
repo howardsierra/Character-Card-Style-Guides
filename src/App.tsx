@@ -7,6 +7,7 @@ import { Textarea } from "./components/ui/textarea";
 import { ScrollArea } from "./components/ui/scroll-area";
 import { Checkbox } from "./components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "./components/ui/tabs";
+import { ToastViewport, useToasts } from "./components/ui/toast";
 import { cn } from "./lib/utils";
 import { CharacterCard, parseFile, parsePdfToText, parseDocxToText, parseFanficFile } from "./lib/parser";
 import { AIProvider, ApiKeys, AIModel, fetchModels, generateStyleGuide, generateStyleGuideFromFanfiction, FanficInput, suggestStyleCombination, StyleCombinationSuggestion, mergeStyleGuides, generateCharacterCard, extractSlotsFromGuide, suggestArchetype, extractUniverse, UniverseData, generateScript } from "./lib/api";
@@ -21,11 +22,10 @@ import { ModelSelector } from "./components/ModelSelector";
 import { useHistory } from "./hooks/useHistory";
 import localforage from "localforage";
 
-// Firebase Imports
-import { auth, db, handleFirestoreError, OperationType } from "./lib/firebase";
-import { signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
-import { useAuthState } from "react-firebase-hooks/auth";
-import { collection, doc, getDocs, setDoc, deleteDoc, query, onSnapshot, writeBatch, serverTimestamp, getDoc } from "firebase/firestore";
+// Firebase is loaded on demand; nothing here pulls the SDK into the main chunk.
+import { handleFirestoreError, OperationType } from "./lib/firebase";
+import { fetchCollection, writeDoc, removeDoc, signInWithGoogle, signOutOfFirebase } from "./lib/firebaseSync";
+import { useFirebaseAuth } from "./hooks/useFirebaseAuth";
 
 function ConfiguredModelSelector(props: Omit<React.ComponentProps<typeof ModelSelector>, 'customEndpoints'> & { apiKeys: ApiKeys }) {
   return <ModelSelector {...props} customEndpoints={props.apiKeys.customEndpoints} />;
@@ -101,7 +101,7 @@ interface SavedDraft {
 function InfoTooltip({ text }: { text: string }) {
   return (
     <div className="group relative inline-flex items-center ml-1.5 align-middle">
-      <Info className="w-4 h-4 text-slate-400 hover:text-[#8B3A3A] transition-colors cursor-help" />
+      <Info className="w-4 h-4 text-slate-400 hover:text-primary transition-colors cursor-help" />
       <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 p-3 bg-slate-800 text-white text-xs rounded-lg opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all z-50 shadow-xl pointer-events-none font-normal leading-relaxed text-left">
         {text}
         <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-800"></div>
@@ -118,11 +118,11 @@ function NavButton({ view, icon: Icon, label, currentView, setView }: any) {
       className={cn(
         "flex-none md:w-full flex-row flex items-center justify-center md:justify-start gap-2 md:gap-3 px-4 md:px-4 py-2.5 md:py-3 rounded-full md:rounded-xl text-[13px] md:text-sm transition-all duration-300 snap-center md:snap-align-none overflow-hidden relative",
         isActive 
-          ? "text-[#8B3A3A] bg-white md:bg-white shadow-sm md:shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-black/5 md:border-[#e5e4e2]" 
+          ? "text-primary bg-card md:bg-card shadow-sm md:shadow-[0_1px_3px_rgba(0,0,0,0.05)] border border-black/5 md:border-border" 
           : "bg-transparent text-slate-500 hover:bg-black/5 hover:text-slate-900 border border-transparent"
       )}
     >
-      <Icon className={cn("w-[18px] h-[18px] md:w-5 md:h-5 transition-transform duration-300 z-10", isActive ? "scale-110 text-[#8B3A3A]" : "")} strokeWidth={isActive ? 2.5 : 2} />
+      <Icon className={cn("w-[18px] h-[18px] md:w-5 md:h-5 transition-transform duration-300 z-10", isActive ? "scale-110 text-primary" : "")} strokeWidth={isActive ? 2.5 : 2} />
       <span className={cn("z-10 whitespace-nowrap tracking-wide", isActive ? "font-bold md:font-semibold" : "font-medium")}>
         {label}
       </span>
@@ -155,7 +155,7 @@ function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: strin
         value={value}
         onChange={onChange}
         disabled={disabled}
-        className="rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] pr-[4.5rem] text-base w-full"
+        className="rounded-xl border-border focus-visible:ring-primary pr-[4.5rem] text-base w-full"
         autoComplete="off"
         autoCorrect="off"
         autoCapitalize="off"
@@ -186,13 +186,17 @@ function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: strin
 }
 
 export default function App() {
-  const [user, loadingAuth] = useAuthState(auth);
+  const [user, loadingAuth, ensureAuth] = useFirebaseAuth();
+  const { toasts, notify, dismiss } = useToasts();
 
   const handleLogin = () => {
-    signInWithPopup(auth, new GoogleAuthProvider()).catch((error) => console.error("Login failed", error));
+    // Bring the auth subscription up before the popup, so the resulting sign-in
+    // is observed even on a browser that had never signed in before.
+    ensureAuth();
+    signInWithGoogle().catch((error) => console.error("Login failed", error));
   };
   const handleLogout = () => {
-    signOut(auth);
+    signOutOfFirebase().catch((error) => console.error("Logout failed", error));
   };
 
   const [theme, setTheme] = useState<"light" | "dark">(() => {
@@ -294,6 +298,8 @@ export default function App() {
   };
 
   const [forgeSelectedGuide, setForgeSelectedGuide] = useState<string>("");
+  // 0 means "no limit"; the input renders an empty field for that value.
+  const [forgeTokenLimit, setForgeTokenLimit] = useState<number>(0);
   const [forgeSelectedTemplate, setForgeSelectedTemplate] = useState<string>("");
   const [customTemplates, setCustomTemplates] = useState<CardTemplate[]>([]);
   const [isTemplateEditorOpen, setIsTemplateEditorOpen] = useState(false);
@@ -414,11 +420,13 @@ export default function App() {
         
         await Promise.all(promises);
 
-        alert("Data imported successfully. The page will reload to apply changes.");
-        window.location.reload();
+        notify("Data imported successfully. The page will reload to apply changes.", "success");
+        // Toasts are non-blocking, unlike the alert() this replaced, so hold the
+        // reload long enough for the message to actually be read.
+        setTimeout(() => window.location.reload(), 1500);
       } catch (err) {
         console.error("Failed to import data", err);
-        alert("Failed to import data. Please ensure the file is a valid JSON backup.");
+        notify("Failed to import data. Please ensure the file is a valid JSON backup.");
       }
     };
     reader.readAsText(file);
@@ -440,10 +448,10 @@ export default function App() {
     });
 
     if (recoveredCount > 0) {
-      alert(`Found and recovered ${recoveredCount} items from browser legacy storage. Please reload the page.`);
-      window.location.reload();
+      notify(`Found and recovered ${recoveredCount} items from browser legacy storage. Reloading...`, "success");
+      setTimeout(() => window.location.reload(), 1500);
     } else {
-      alert("No legacy data found in browser storage.");
+      notify("No legacy data found in browser storage.");
     }
   };
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -465,7 +473,10 @@ export default function App() {
     const savedProvider = localStorage.getItem("st_style_provider");
     if (savedProvider) setProvider(savedProvider as AIProvider);
 
-    localforage.getItem("st_forge_draft").then((savedDraftData: any) => {
+    localforage.getItem("st_forge_draft").catch(e => {
+      console.error("Failed to load forge draft", e);
+      return null;
+    }).then((savedDraftData: any) => {
       if (savedDraftData) {
         if (savedDraftData.forgeName) setForgeName(savedDraftData.forgeName);
         if (savedDraftData.forgeConcept) setForgeConcept(savedDraftData.forgeConcept);
@@ -521,6 +532,11 @@ export default function App() {
         }]);
       }
       setGuidesLoaded(true);
+    }).catch(e => {
+      // Fail open: if storage is unreadable we still have to release the write
+      // gate, otherwise nothing this session would ever be persisted.
+      console.error("Failed to load saved guides", e);
+      setGuidesLoaded(true);
     });
 
     localforage.getItem("st_custom_templates").then((savedTemplatesData: any) => {
@@ -538,6 +554,9 @@ export default function App() {
           } catch (e) {}
         }
       }
+      setCustomTemplatesLoaded(true);
+    }).catch(e => {
+      console.error("Failed to load custom templates", e);
       setCustomTemplatesLoaded(true);
     });
 
@@ -557,10 +576,16 @@ export default function App() {
         }
       }
       setSavedCardsLoaded(true);
+    }).catch(e => {
+      console.error("Failed to load saved cards", e);
+      setSavedCardsLoaded(true);
     });
 
     localforage.getItem("st_saved_drafts").then((savedDraftsData: any) => {
       if (savedDraftsData) setSavedDrafts(savedDraftsData);
+      setSavedDraftsLoaded(true);
+    }).catch(e => {
+      console.error("Failed to load saved drafts", e);
       setSavedDraftsLoaded(true);
     });
 
@@ -598,11 +623,15 @@ export default function App() {
           if (typeof parsed.imageAspectRatio === "string") setImageAspectRatio(parsed.imageAspectRatio);
           if (typeof parsed.imageSize === "string") setImageSize(parsed.imageSize);
           if (typeof parsed.imageStyle === "string") setImageStyle(parsed.imageStyle);
+          if (typeof parsed.forgeTokenLimit === "number") setForgeTokenLimit(parsed.forgeTokenLimit);
           if (parsed.forgedCard !== undefined) setForgedCard(parsed.forgedCard);
         } catch (e) {
           console.error("Failed to load app autosave", e);
         }
       }
+      setHasHydratedAutosave(true);
+    }).catch(e => {
+      console.error("Failed to load app autosave", e);
       setHasHydratedAutosave(true);
     });
   }, []);
@@ -610,64 +639,43 @@ export default function App() {
   // Firebase Sync
   useEffect(() => {
     if (!user) return;
+    const uid = user.uid;
+
+    // Same shape four times over: adopt the cloud copy if it exists, otherwise
+    // seed the cloud from whatever this device already has.
+    const collections: { name: string; local: any[]; apply: (rows: any[]) => void }[] = [
+      { name: "style_guides", local: guides, apply: setGuides },
+      { name: "saved_cards", local: savedCards, apply: setSavedCards },
+      { name: "custom_templates", local: customTemplates, apply: setCustomTemplates },
+      { name: "character_drafts", local: savedDrafts, apply: setSavedDrafts },
+    ];
+
     const fetchFromFirebase = async () => {
-      try {
-        const guidesSnap = await getDocs(collection(db, "users", user.uid, "style_guides"));
-        const cardsSnap = await getDocs(collection(db, "users", user.uid, "saved_cards"));
-        const templatesSnap = await getDocs(collection(db, "users", user.uid, "custom_templates"));
-        const draftsSnap = await getDocs(collection(db, "users", user.uid, "character_drafts"));
-        
-        let fbGuides: any[] = [];
-        guidesSnap.forEach(doc => fbGuides.push(doc.data()));
-        
-        let fbCards: any[] = [];
-        cardsSnap.forEach(doc => fbCards.push(doc.data()));
-        
-        let fbTemplates: any[] = [];
-        templatesSnap.forEach(doc => fbTemplates.push(doc.data()));
-        
-        let fbDrafts: any[] = [];
-        draftsSnap.forEach(doc => fbDrafts.push(doc.data()));
+      for (const { name, local, apply } of collections) {
+        try {
+          const remote = await fetchCollection(uid, name);
+          if (remote.length > 0) {
+            apply(remote);
+            continue;
+          }
 
-        // If Firebase has data, use it. If not, maybe upload existing local data?
-        if (fbGuides.length > 0) setGuides(fbGuides);
-        else if (guides.length > 0) {
-          guides.forEach(async (g) => {
-            try {
-              if (g.id) await setDoc(doc(db, "users", user.uid, "style_guides", g.id), { ...g, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "style_guides"); }
-          });
+          const now = Date.now();
+          // allSettled so one rejected write does not abandon the rest; note
+          // handleFirestoreError rethrows, which is what surfaces here.
+          const results = await Promise.allSettled(
+            local
+              .filter((row) => row.id)
+              .map((row) =>
+                writeDoc(uid, name, row.id, { ...row, userId: uid, createdAt: now, updatedAt: now })
+                  .catch((e) => handleFirestoreError(e, OperationType.CREATE, name))
+              )
+          );
+          for (const r of results) {
+            if (r.status === "rejected") console.error(`Failed to seed ${name}`, r.reason);
+          }
+        } catch (e) {
+          console.error(`Firebase sync error for ${name}`, e);
         }
-        
-        if (fbCards.length > 0) setSavedCards(fbCards);
-        else if (savedCards.length > 0) {
-          savedCards.forEach(async (c) => {
-            try {
-              if (c.id) await setDoc(doc(db, "users", user.uid, "saved_cards", c.id), { ...c, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "saved_cards"); }
-          });
-        }
-        
-        if (fbTemplates.length > 0) setCustomTemplates(fbTemplates);
-        else if (customTemplates.length > 0) {
-          customTemplates.forEach(async (t) => {
-            try {
-              if (t.id) await setDoc(doc(db, "users", user.uid, "custom_templates", t.id), { ...t, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "custom_templates"); }
-          });
-        }
-        
-        if (fbDrafts.length > 0) setSavedDrafts(fbDrafts);
-        else if (savedDrafts.length > 0) {
-          savedDrafts.forEach(async (d) => {
-            try {
-              if (d.id) await setDoc(doc(db, "users", user.uid, "character_drafts", d.id), { ...d, userId: user.uid, createdAt: Date.now(), updatedAt: Date.now() });
-            } catch (e) { handleFirestoreError(e, OperationType.CREATE, "character_drafts"); }
-          });
-        }
-
-      } catch (e) {
-        console.error("Firebase sync error", e);
       }
     };
     fetchFromFirebase();
@@ -679,7 +687,7 @@ export default function App() {
     guides.forEach(async (g) => {
       if (g.id) {
         try {
-          await setDoc(doc(db, "users", user.uid, "style_guides", g.id), { ...g, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+          await writeDoc(user.uid, "style_guides", g.id, { ...g, userId: user.uid, updatedAt: Date.now() }, { merge: true });
         } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "style_guides"); }
       }
     });
@@ -690,7 +698,7 @@ export default function App() {
     savedCards.forEach(async (c) => {
       if (c.id) {
         try {
-          await setDoc(doc(db, "users", user.uid, "saved_cards", c.id), { ...c, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+          await writeDoc(user.uid, "saved_cards", c.id, { ...c, userId: user.uid, updatedAt: Date.now() }, { merge: true });
         } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "saved_cards"); }
       }
     });
@@ -701,7 +709,7 @@ export default function App() {
     customTemplates.forEach(async (t) => {
       if (t.id) {
         try {
-          await setDoc(doc(db, "users", user.uid, "custom_templates", t.id), { ...t, userId: user.uid, updatedAt: Date.now() }, { merge: true });
+          await writeDoc(user.uid, "custom_templates", t.id, { ...t, userId: user.uid, updatedAt: Date.now() }, { merge: true });
         } catch (e) { handleFirestoreError(e, OperationType.UPDATE, "custom_templates"); }
       }
     });
@@ -764,12 +772,13 @@ export default function App() {
       imageAspectRatio,
       imageSize,
       imageStyle,
+      forgeTokenLimit,
       forgedCard,
       forgeBaseCard
     };
     localforage.setItem(APP_AUTOSAVE_KEY, appState).catch(e => console.error(e));
     if (user) {
-      setDoc(doc(db, "users", user.uid, "app_state", "autosave"), { ...appState, userId: user.uid, updatedAt: Date.now() }).catch(err => {
+      writeDoc(user.uid, "app_state", "autosave", { ...appState, userId: user.uid, updatedAt: Date.now() }).catch(err => {
         // We log it but do not throw to avoid spamming the console on every typed character
         console.warn("Autosave Firebase sync error", err);
       });
@@ -794,6 +803,7 @@ export default function App() {
     imageAspectRatio,
     imageSize,
     imageStyle,
+    forgeTokenLimit,
     forgedCard,
     forgeBaseCard
   ]);
@@ -928,23 +938,23 @@ export default function App() {
         }
       } catch (err: any) {
         console.error("Failed to parse file", e.target.files[i].name, err);
-        alert(`Failed to parse file ${e.target.files[i].name}:\n${err?.message || err}`);
+        notify(`Failed to parse file ${e.target.files[i].name}:\n${err?.message || err}`);
       }
     }
     
     if (newCards.length > 0) {
       setCards((prev) => [...prev, ...newCards]);
-      alert(`Imported ${newCards.length} character card(s) to Corpus Ingestion!`);
+      notify(`Imported ${newCards.length} character card(s) to Corpus Ingestion!`);
     }
     
     if (newGuides.length > 0) {
       setGuides((prev) => [...newGuides, ...prev]);
-      alert(`Imported ${newGuides.length} style guide(s) to the Library!`);
+      notify(`Imported ${newGuides.length} style guide(s) to the Library!`);
       setView("saved");
     }
 
     if (newCards.length === 0 && newGuides.length === 0) {
-      alert("No valid character cards or style guides found in the uploaded files.");
+      notify("No valid character cards or style guides found in the uploaded files.");
     }
     
     setIsParsing(false);
@@ -961,7 +971,7 @@ export default function App() {
       try {
         const { title, text } = await parseFanficFile(file);
         if (!text || text.trim().length < 50) {
-          alert(`"${file.name}" produced little or no readable text. If it is a scanned PDF, try a text-based PDF or DOCX/TXT instead.`);
+          notify(`"${file.name}" produced little or no readable text. If it is a scanned PDF, try a text-based PDF or DOCX/TXT instead.`);
           continue;
         }
         newFics.push({
@@ -972,7 +982,7 @@ export default function App() {
         });
       } catch (err: any) {
         console.error("Failed to parse fanfic", file.name, err);
-        alert(`Failed to parse ${file.name}:\n${err?.message || err}`);
+        notify(`Failed to parse ${file.name}:\n${err?.message || err}`);
       }
     }
 
@@ -1007,7 +1017,7 @@ export default function App() {
       setShowVersions(false);
     } catch (err) {
       console.error(err);
-      alert("Failed to generate guide from fanfiction. Check console for details.");
+      notify("Failed to generate guide from fanfiction. Check console for details.");
     } finally {
       setIsGenerating(false);
     }
@@ -1128,7 +1138,7 @@ export default function App() {
 
   const saveTemplate = () => {
     if (!editingTemplateName.trim() || !editingTemplateContent.trim()) {
-      alert("Template name and content are required.");
+      notify("Template name and content are required.");
       return;
     }
 
@@ -1158,7 +1168,7 @@ export default function App() {
     if (confirm("Are you sure you want to delete this custom template?")) {
       setCustomTemplates(prev => prev.filter(t => t.id !== id));
       if (user) {
-        deleteDoc(doc(db, "users", user.uid, "custom_templates", id)).catch(e => handleFirestoreError(e, OperationType.DELETE, "custom_templates"));
+        removeDoc(user.uid, "custom_templates", id).catch(e => handleFirestoreError(e, OperationType.DELETE, "custom_templates"));
       }
       if (forgeSelectedTemplate === id) {
         setForgeSelectedTemplate("");
@@ -1216,10 +1226,10 @@ export default function App() {
       setSuggestedSong(null);
       setForgeSlots(prev => applyCardToSlots(prev, uploadedCard));
       setView("create");
-      alert("Base card loaded into Card Forge. Choose a style guide/template and use AI tools to alternate it.");
+      notify("Base card loaded into Card Forge. Choose a style guide/template and use AI tools to alternate it.");
     } catch (err) {
       console.error(err);
-      alert("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
+      notify("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
     } finally {
       e.target.value = "";
     }
@@ -1272,7 +1282,7 @@ export default function App() {
       setView("generate");
     } catch (err) {
       console.error(err);
-      alert("Failed to generate guide. Check console for details.");
+      notify("Failed to generate guide. Check console for details.");
     } finally {
       setIsGenerating(false);
     }
@@ -1296,7 +1306,7 @@ export default function App() {
       setSelectedGuides(new Set());
     } catch (err) {
       console.error(err);
-      alert("Failed to merge guides. Check console for details.");
+      notify("Failed to merge guides. Check console for details.");
     } finally {
       setIsGenerating(false);
     }
@@ -1323,7 +1333,7 @@ export default function App() {
       setCombinationSuggestion(result);
     } catch (err: any) {
       console.error(err);
-      alert("Failed to analyze combination: " + (err.message || err));
+      notify("Failed to analyze combination: " + (err.message || err));
     } finally {
       setIsSuggestingCombination(false);
     }
@@ -1345,7 +1355,7 @@ export default function App() {
     };
     setGuides((prev) => [newGuide, ...prev]);
     setCurrentGuideId(newGuide.id);
-    alert("Guide saved!");
+    notify("Guide saved!");
   };
 
   const updateCurrentGuide = () => {
@@ -1368,7 +1378,7 @@ export default function App() {
     }));
     setCurrentGuide(editedGuideContent);
     setIsEditingGuide(false);
-    alert("Guide updated!");
+    notify("Guide updated!");
   };
 
   const revertToVersion = (version: GuideVersion) => {
@@ -1391,7 +1401,7 @@ export default function App() {
     }));
     setCurrentGuide(version.content);
     setShowVersions(false);
-    alert("Reverted to previous version!");
+    notify("Reverted to previous version!");
   };
 
   const exportPDF = async () => {
@@ -1584,7 +1594,7 @@ export default function App() {
       doc.save(filename);
     } catch (err) {
       console.error("Failed to export PDF:", err);
-      alert("Failed to export PDF. Please try again.");
+      notify("Failed to export PDF. Please try again.");
     }
   };
 
@@ -1618,7 +1628,7 @@ export default function App() {
   const deleteGuide = (id: string) => {
     setGuides((prev) => prev.filter((g) => g.id !== id));
     if (user) {
-      deleteDoc(doc(db, "users", user.uid, "style_guides", id)).catch(e => handleFirestoreError(e, OperationType.DELETE, "style_guides"));
+      removeDoc(user.uid, "style_guides", id).catch(e => handleFirestoreError(e, OperationType.DELETE, "style_guides"));
     }
     const newSet = new Set(selectedGuides);
     newSet.delete(id);
@@ -1672,7 +1682,7 @@ export default function App() {
       if (template) {
         import("./lib/api").then(({ extractSlotsFromTemplate }) => {
           const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
-          extractSlotsFromTemplate(currentProvider, apiKeys, template.content, currentModel, template.example).then(slots => {
+          return extractSlotsFromTemplate(currentProvider, apiKeys, template.content, currentModel, template.example).then(slots => {
             setForgeSlots(prev => {
               const merged = slots.map(s => {
                 const existing = prev.find(p => p.name === s.name);
@@ -1680,9 +1690,14 @@ export default function App() {
               });
               return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
             });
-            setIsExtractingSlots(false);
           });
-        });
+        }).catch((err: any) => {
+          // Templates the regex cannot parse fall back to an AI call, which can
+          // reject. Without this the spinner would hang with no explanation.
+          console.error("Failed to extract slots from template", err);
+          setForgeError(`Could not read fields from this template: ${err?.message || err}`);
+          lastExtractedRef.current = { guide: "", template: "" };
+        }).finally(() => setIsExtractingSlots(false));
         return;
       }
     }
@@ -1699,8 +1714,11 @@ export default function App() {
             });
             return forgeBaseCard ? applyCardToSlots(merged, forgeBaseCard) : merged;
           });
-          setIsExtractingSlots(false);
-        });
+        }).catch((err: any) => {
+          console.error("Failed to extract slots from guide", err);
+          setForgeError(`Could not derive fields from this style guide: ${err?.message || err}`);
+          lastExtractedRef.current = { guide: "", template: "" };
+        }).finally(() => setIsExtractingSlots(false));
       } else {
         setIsExtractingSlots(false);
       }
@@ -1764,7 +1782,7 @@ export default function App() {
       setGeneratedScript(result);
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate script: " + err.message);
+      notify("Failed to generate script: " + err.message);
     } finally {
       setIsGeneratingScript(false);
     }
@@ -1785,7 +1803,7 @@ export default function App() {
       setUniverseData(data);
     } catch (err) {
       console.error(err);
-      alert("Failed to extract universe data.");
+      notify("Failed to extract universe data.");
     } finally {
       setIsExtractingUniverse(false);
     }
@@ -1840,7 +1858,8 @@ export default function App() {
         currentModel,
         forgeFirstMessageIdea,
         templateExample,
-        (partial) => setForgeStreamText(partial)
+        (partial) => setForgeStreamText(partial),
+        forgeTokenLimit || undefined
       );
       setForgedCard(result);
       setForgeStreamText("");
@@ -1864,7 +1883,7 @@ export default function App() {
       setImagePrompt(prompt);
     } catch (err) {
       console.error(err);
-      alert("Failed to generate image prompt.");
+      notify("Failed to generate image prompt.");
     } finally {
       setIsGeneratingImagePrompt(false);
     }
@@ -1880,7 +1899,7 @@ export default function App() {
       setSuggestedSong(song);
     } catch (err) {
       console.error(err);
-      alert("Failed to suggest theme song.");
+      notify("Failed to suggest theme song.");
     } finally {
       setIsSuggestingSong(false);
     }
@@ -1911,7 +1930,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate greeting: " + (err.message || err));
+      notify("Failed to generate greeting: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsGeneratingGreeting(false);
@@ -1926,7 +1945,7 @@ export default function App() {
       setStudioUploadedCard(card);
     } catch (err) {
       console.error(err);
-      alert("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
+      notify("Failed to parse card file. Please upload a valid .json or SillyTavern .png card.");
     }
     e.target.value = "";
   };
@@ -1936,11 +1955,11 @@ export default function App() {
       ? savedCards.find(c => c.id === studioSelectedCardId)?.card
       : studioUploadedCard;
     if (!card) {
-      alert(studioCardSource === "saved" ? "Please select a saved card first." : "Please upload a card first.");
+      notify(studioCardSource === "saved" ? "Please select a saved card first." : "Please upload a card first.");
       return;
     }
     if (!studioVibePrompt.trim()) {
-      alert("Please describe what you want the new greeting to be about.");
+      notify("Please describe what you want the new greeting to be about.");
       return;
     }
     setIsStudioGenerating(true);
@@ -1964,7 +1983,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate greeting: " + (err.message || err));
+      notify("Failed to generate greeting: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsStudioGenerating(false);
@@ -1987,21 +2006,21 @@ export default function App() {
       setStudioUploadedCard(updated);
     }
     setStudioGeneratedGreeting("");
-    alert("Greeting added to card!");
+    notify("Greeting added to card!");
   };
 
   const handleAdaptCard = async () => {
     if (!adaptRawText.trim()) {
-      alert("Please paste your card text first.");
+      notify("Please paste your card text first.");
       return;
     }
     if (!adaptSelectedGuide) {
-      alert("Please select a style guide to adapt the card to.");
+      notify("Please select a style guide to adapt the card to.");
       return;
     }
     const guide = guides.find(g => g.id === adaptSelectedGuide);
     if (!guide) {
-      alert("Selected style guide not found.");
+      notify("Selected style guide not found.");
       return;
     }
     setIsAdapting(true);
@@ -2022,7 +2041,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to adapt card: " + (err.message || err));
+      notify("Failed to adapt card: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsAdapting(false);
@@ -2064,7 +2083,7 @@ export default function App() {
       setForgeStreamText("");
     } catch (err: any) {
       console.error(err);
-      alert("Failed to generate greeting: " + (err.message || err));
+      notify("Failed to generate greeting: " + (err.message || err));
       setForgeStreamText("");
     } finally {
       setIsAdapting(false);
@@ -2100,7 +2119,7 @@ export default function App() {
 
   const handleGenerateSlot = async (index: number) => {
     if (!forgeSelectedGuide) {
-      alert("Please select a style guide first to generate slot content.");
+      notify("Please select a style guide first to generate slot content.");
       return;
     }
     const guide = guides.find(g => g.id === forgeSelectedGuide);
@@ -2146,7 +2165,7 @@ export default function App() {
       });
     } catch (err: any) {
       console.error(err);
-      alert(`Failed to generate slot content: ${err?.message || "Unknown error"}`);
+      notify(`Failed to generate slot content: ${err?.message || "Unknown error"}`);
     } finally {
       setGeneratingSlotIndex(null);
     }
@@ -2186,11 +2205,11 @@ export default function App() {
 
   const handleVibeForge = async () => {
     if (!vibePrompt.trim()) {
-      alert("Please enter a vibe or description first.");
+      notify("Please enter a vibe or description first.");
       return;
     }
     if (!forgeSelectedGuide) {
-      alert("Please select a Style Guide first.");
+      notify("Please select a Style Guide first.");
       return;
     }
     setIsVibeForging(true);
@@ -2239,7 +2258,7 @@ export default function App() {
 
   const handleAutoFill = async () => {
     if (!forgeName || !forgeConcept) {
-      alert("Please provide a Name and Core Concept first.");
+      notify("Please provide a Name and Core Concept first.");
       return;
     }
     setIsAutoFilling(true);
@@ -2259,7 +2278,7 @@ export default function App() {
       }));
     } catch (err) {
       console.error(err);
-      alert("Failed to auto-fill slots.");
+      notify("Failed to auto-fill slots.");
     } finally {
       setIsAutoFilling(false);
     }
@@ -2301,7 +2320,7 @@ export default function App() {
       date: new Date().toISOString(),
     };
     setSavedCards(prev => [...prev, newSavedCard]);
-    alert("Card saved to library!");
+    notify("Card saved to library!");
   };
 
   const handleSaveDraft = async (section: string) => {
@@ -2333,12 +2352,13 @@ export default function App() {
           scriptPrompt,
           imageAspectRatio,
           imageStyle,
+          forgeTokenLimit,
         });
       }
-      alert("Draft saved successfully!");
+      notify("Draft saved successfully!");
     } catch (e) {
       console.error("Failed to save draft", e);
-      alert("Failed to save draft.");
+      notify("Failed to save draft.");
     }
   };
 
@@ -2351,7 +2371,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex flex-col md:flex-row h-[100dvh] w-full bg-[#f9f8f6] text-slate-900 overflow-hidden font-sans">
+    <div className="flex flex-col md:flex-row h-[100dvh] w-full bg-background text-slate-900 overflow-hidden font-sans">
       {/* Always-mounted file input, shared by Corpus Ingestion's Browse and Library's Import Guide */}
       <input
         type="file"
@@ -2371,14 +2391,14 @@ export default function App() {
         onChange={handleFanficUpload}
       />
       {/* Sidebar for Desktop / Topbar for Mobile */}
-      <div className="w-full md:w-72 bg-[#f9f8f6] border-b md:border-b-0 md:border-r border-[#e5e4e2]/80 flex flex-col z-20 shrink-0 shadow-sm md:shadow-none">
+      <div className="w-full md:w-72 bg-background border-b md:border-b-0 md:border-r border-border/80 flex flex-col z-20 shrink-0 shadow-sm md:shadow-none">
         <div className="p-3 md:p-8 flex justify-between items-center md:block">
           <div className="flex justify-between items-center md:items-start w-full">
             <div>
-              <h1 className="text-xl md:text-3xl font-serif font-bold text-[#8B3A3A] tracking-tight">
+              <h1 className="text-xl md:text-[2rem] md:leading-none font-serif font-bold text-primary tracking-[-0.02em]">
                 StyleForge
               </h1>
-              <p className="hidden md:block text-xs font-medium tracking-widest uppercase text-slate-500 mt-2">
+              <p className="hidden md:block text-[10px] font-semibold tracking-[0.18em] uppercase text-slate-400 mt-2.5 whitespace-nowrap">
                 Authorial Voice Engine
               </p>
             </div>
@@ -2435,25 +2455,25 @@ export default function App() {
                   className="space-y-6 md:space-y-8"
                 >
                   <div className="space-y-2">
-                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Corpus Ingestion</h2>
-                    <p className="text-slate-500 text-base md:text-lg font-light">
+                    <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Corpus Ingestion</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                       Upload character cards to establish the authorial baseline. A minimum of 15 cards is recommended for accurate style extraction.
                     </p>
                   </div>
 
                   <div 
-                    className="border-dashed border-[1.5px] border-[#d1d0ce] bg-white/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:border-[#8B3A3A]/30 cursor-pointer"
+                    className="border-dashed border-[1.5px] border-foreground/20 bg-card/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-card hover:border-primary/30 cursor-pointer"
                     onClick={() => fileInputRef.current?.click()}
                   >
-                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
-                      <Upload className="w-5 h-5 md:w-6 md:h-6 text-[#8B3A3A]" />
+                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-muted flex items-center justify-center mb-4 md:mb-6">
+                      <Upload className="w-5 h-5 md:w-6 md:h-6 text-primary" />
                     </div>
                     <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Select Character Cards</h3>
                     <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
                       Drag and drop PNG, JSON, PDF, or DOCX files here, or click to browse your computer.
                     </p>
                     <Button
-                      className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105" 
+                      className="bg-primary-solid hover:bg-primary-hover text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-primary/20 transition-all hover:scale-105" 
                       disabled={isParsing}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2471,7 +2491,7 @@ export default function App() {
                       animate={{ opacity: 1, y: 0 }}
                       className="space-y-6"
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-[#e5e4e2] pb-4 gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-border pb-4 gap-4">
                         <div>
                           <h3 className="text-2xl font-serif font-medium">Analyzed Subjects</h3>
                           <p className="text-sm text-slate-500 mt-1">{cards.length} cards loaded</p>
@@ -2499,10 +2519,10 @@ export default function App() {
                       
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {cards.map((card, i) => (
-                          <div key={i} className="group relative bg-white border border-[#e5e4e2] rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between min-h-[120px]">
+                          <div key={i} className="group relative bg-card border border-border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between min-h-[120px]">
                             <div className="flex gap-4">
                               <div 
-                                className="relative w-16 h-16 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0 border border-[#e5e4e2] flex items-center justify-center group/image cursor-pointer" 
+                                className="relative w-16 h-16 rounded-xl overflow-hidden bg-slate-100 flex-shrink-0 border border-border flex items-center justify-center group/image cursor-pointer" 
                                 onClick={(e) => { e.stopPropagation(); document.getElementById(`image-upload-${i}`)?.click(); }}
                                 title="Upload Character Image"
                               >
@@ -2573,25 +2593,25 @@ export default function App() {
                   className="space-y-6 md:space-y-8"
                 >
                   <div className="space-y-2">
-                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Fanfiction Distillery</h2>
-                    <p className="text-slate-500 text-base md:text-lg font-light">
+                    <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Fanfiction Distillery</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                       Upload an author's fanfiction and distill their prose into a writing style guide. Just one or two works per author is enough to capture a faithful voice profile.
                     </p>
                   </div>
 
                   <div
-                    className="border-dashed border-[1.5px] border-[#d1d0ce] bg-white/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-white hover:border-[#8B3A3A]/30 cursor-pointer"
+                    className="border-dashed border-[1.5px] border-foreground/20 bg-card/50 rounded-3xl p-8 md:p-16 flex flex-col items-center justify-center text-center transition-all hover:bg-card hover:border-primary/30 cursor-pointer"
                     onClick={() => fanficInputRef.current?.click()}
                   >
-                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
-                      <Feather className="w-5 h-5 md:w-6 md:h-6 text-[#8B3A3A]" />
+                    <div className="w-12 h-12 md:w-16 md:h-16 rounded-full bg-muted flex items-center justify-center mb-4 md:mb-6">
+                      <Feather className="w-5 h-5 md:w-6 md:h-6 text-primary" />
                     </div>
                     <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Upload Fanfiction</h3>
                     <p className="text-slate-500 mt-2 mb-6 md:mb-8 max-w-md text-sm md:text-base">
                       Drag and drop PDF, DOCX, or TXT files here, or click to browse. One or two fics per author is plenty.
                     </p>
                     <Button
-                      className="bg-[#8B3A3A] hover:bg-[#7a3333] text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-[#8B3A3A]/20 transition-all hover:scale-105"
+                      className="bg-primary-solid hover:bg-primary-hover text-white rounded-full px-6 py-5 md:px-8 md:py-6 text-sm md:text-base shadow-lg shadow-primary/20 transition-all hover:scale-105"
                       disabled={isParsingFanfic}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -2609,7 +2629,7 @@ export default function App() {
                       animate={{ opacity: 1, y: 0 }}
                       className="space-y-6"
                     >
-                      <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-[#e5e4e2] pb-4 gap-4">
+                      <div className="flex flex-col sm:flex-row sm:items-end justify-between border-b border-border pb-4 gap-4">
                         <div>
                           <h3 className="text-2xl font-serif font-medium">Loaded Works</h3>
                           <p className="text-sm text-slate-500 mt-1">{fanfics.length} {fanfics.length === 1 ? "work" : "works"} loaded</p>
@@ -2637,7 +2657,7 @@ export default function App() {
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {fanfics.map((fic) => (
-                          <div key={fic.id} className="group relative bg-white border border-[#e5e4e2] rounded-2xl p-5 shadow-sm hover:shadow-md transition-all">
+                          <div key={fic.id} className="group relative bg-card border border-border rounded-2xl p-5 shadow-sm hover:shadow-md transition-all">
                             <button
                               className="absolute top-4 right-4 w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 opacity-0 group-hover:opacity-100 hover:bg-red-50 hover:text-red-600 transition-all"
                               onClick={(e) => { e.stopPropagation(); removeFanfic(fic.id); }}
@@ -2646,8 +2666,8 @@ export default function App() {
                               <Trash2 className="w-4 h-4" />
                             </button>
                             <div className="flex items-start gap-3 pr-8">
-                              <div className="w-10 h-10 rounded-xl bg-[#f0efe9] flex items-center justify-center flex-shrink-0">
-                                <Feather className="w-5 h-5 text-[#8B3A3A]" />
+                              <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center flex-shrink-0">
+                                <Feather className="w-5 h-5 text-primary" />
                               </div>
                               <div className="flex-1 min-w-0 space-y-2">
                                 <div>
@@ -2656,7 +2676,7 @@ export default function App() {
                                     value={fic.title}
                                     onChange={(e) => updateFanfic(fic.id, "title", e.target.value)}
                                     placeholder="Untitled"
-                                    className="h-8 text-sm border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                                    className="h-8 text-sm border-border focus-visible:ring-primary"
                                   />
                                 </div>
                                 <div>
@@ -2665,7 +2685,7 @@ export default function App() {
                                     value={fic.author}
                                     onChange={(e) => updateFanfic(fic.id, "author", e.target.value)}
                                     placeholder="Author name (optional)"
-                                    className="h-8 text-sm border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                                    className="h-8 text-sm border-border focus-visible:ring-primary"
                                   />
                                 </div>
                                 <p className="text-xs text-slate-400 pt-1">
@@ -2691,12 +2711,12 @@ export default function App() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6 md:space-y-8"
                 >
-                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-border pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">
                         {currentGuideId ? guides.find(g => g.id === currentGuideId)?.title || "Style Guide" : "Style Guide"}
                       </h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light">
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                         {currentGuideId ? "Saved authorial profile." : "The synthesized authorial profile."}
                       </p>
                     </div>
@@ -2704,30 +2724,30 @@ export default function App() {
                       {currentGuideId ? (
                         isEditingGuide ? (
                           <>
-                            <Button variant="outline" onClick={() => setIsEditingGuide(false)} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                            <Button variant="outline" onClick={() => setIsEditingGuide(false)} className="rounded-full border-border hover:bg-card text-xs md:text-sm px-3 md:px-4">
                               <X className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               Cancel
                             </Button>
-                            <Button onClick={updateCurrentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+                            <Button onClick={updateCurrentGuide} className="rounded-full bg-primary-solid hover:bg-primary-hover text-white shadow-md shadow-primary/20 text-xs md:text-sm px-3 md:px-4">
                               <Save className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               Save Changes
                             </Button>
                           </>
                         ) : (
                           <>
-                            <Button variant="outline" onClick={() => setShowVersions(!showVersions)} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                            <Button variant="outline" onClick={() => setShowVersions(!showVersions)} className="rounded-full border-border hover:bg-card text-xs md:text-sm px-3 md:px-4">
                               <History className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               History
                             </Button>
-                            <Button variant="outline" onClick={() => { setEditedGuideContent(currentGuide || ""); setIsEditingGuide(true); }} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                            <Button variant="outline" onClick={() => { setEditedGuideContent(currentGuide || ""); setIsEditingGuide(true); }} className="rounded-full border-border hover:bg-card text-xs md:text-sm px-3 md:px-4">
                               <Pencil className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               Edit Guide
                             </Button>
-                            <Button onClick={exportJSON} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4" variant="outline">
+                            <Button onClick={exportJSON} className="rounded-full border-border hover:bg-card text-xs md:text-sm px-3 md:px-4" variant="outline">
                               <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               JSON
                             </Button>
-                            <Button onClick={exportPDF} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+                            <Button onClick={exportPDF} className="rounded-full bg-primary-solid hover:bg-primary-hover text-white shadow-md shadow-primary/20 text-xs md:text-sm px-3 md:px-4">
                               <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                               PDF
                             </Button>
@@ -2735,19 +2755,19 @@ export default function App() {
                         )
                       ) : (
                         <>
-                          <Button variant="outline" onClick={() => handleSaveDraft('app')} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                          <Button variant="outline" onClick={() => handleSaveDraft('app')} className="rounded-full border-border hover:bg-card text-xs md:text-sm px-3 md:px-4">
                             <Save className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             Save Draft
                           </Button>
-                          <Button variant="outline" onClick={saveCurrentGuide} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4">
+                          <Button variant="outline" onClick={saveCurrentGuide} disabled={!currentGuide} className="rounded-full border-border hover:bg-card text-xs md:text-sm px-3 md:px-4">
                             <Check className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             Save to Library
                           </Button>
-                          <Button onClick={exportJSON} disabled={!currentGuide} className="rounded-full border-[#e5e4e2] hover:bg-white text-xs md:text-sm px-3 md:px-4" variant="outline">
+                          <Button onClick={exportJSON} disabled={!currentGuide} className="rounded-full border-border hover:bg-card text-xs md:text-sm px-3 md:px-4" variant="outline">
                             <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             JSON
                           </Button>
-                          <Button onClick={exportPDF} disabled={!currentGuide} className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20 text-xs md:text-sm px-3 md:px-4">
+                          <Button onClick={exportPDF} disabled={!currentGuide} className="rounded-full bg-primary-solid hover:bg-primary-hover text-white shadow-md shadow-primary/20 text-xs md:text-sm px-3 md:px-4">
                             <Download className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
                             PDF
                           </Button>
@@ -2757,17 +2777,17 @@ export default function App() {
                   </div>
 
                   {showVersions && currentGuideId && (
-                    <div className="bg-white border border-[#e5e4e2] rounded-xl p-4 md:p-6 shadow-sm">
+                    <div className="bg-card border border-border rounded-xl p-4 md:p-6 shadow-sm">
                       <h3 className="text-lg md:text-xl font-serif font-medium text-slate-900 mb-4">Version History</h3>
                       <div className="space-y-3 md:space-y-4 max-h-64 overflow-y-auto pr-2">
                         {guides.find(g => g.id === currentGuideId)?.versions?.length ? (
                           guides.find(g => g.id === currentGuideId)?.versions?.map((v, i, arr) => (
-                            <div key={v.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 md:p-4 border border-[#e5e4e2] rounded-lg bg-slate-50 gap-3 sm:gap-0">
+                            <div key={v.id} className="flex flex-col sm:flex-row sm:items-center justify-between p-3 md:p-4 border border-border rounded-lg bg-slate-50 gap-3 sm:gap-0">
                               <div>
                                 <p className="font-medium text-slate-900 text-sm md:text-base">Version {arr.length - i}</p>
                                 <p className="text-xs md:text-sm text-slate-500">{new Date(v.date).toLocaleString()}</p>
                               </div>
-                              <Button variant="outline" size="sm" onClick={() => revertToVersion(v)} className="rounded-full text-[#8B3A3A] border-[#e5e4e2] hover:bg-white w-full sm:w-auto">
+                              <Button variant="outline" size="sm" onClick={() => revertToVersion(v)} className="rounded-full text-primary border-border hover:bg-card w-full sm:w-auto">
                                 <History className="w-4 h-4 mr-2" />
                                 Revert
                               </Button>
@@ -2781,8 +2801,8 @@ export default function App() {
                   )}
 
                   {isGenerating ? (
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
-                      <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                    <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+                      <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-primary animate-spin mb-4 md:mb-6" />
                       <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Synthesizing Authorial Voice...</h3>
                       <p className="text-slate-500 mt-2 max-w-md text-sm md:text-base">
                         {cards.length > 0
@@ -2791,26 +2811,26 @@ export default function App() {
                       </p>
                     </div>
                   ) : currentGuide ? (
-                    <div className="bg-white border border-[#e5e4e2] rounded-xl shadow-sm overflow-hidden">
+                    <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
                       {isEditingGuide ? (
                         <div className="p-4 md:p-8">
                           <Textarea 
                             value={editedGuideContent}
                             onChange={(e) => setEditedGuideContent(e.target.value)}
-                            className="min-h-[500px] md:min-h-[800px] font-mono text-xs md:text-sm p-4 md:p-6 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                            className="min-h-[500px] md:min-h-[800px] font-mono text-xs md:text-sm p-4 md:p-6 rounded-xl border-border focus-visible:ring-primary"
                           />
                         </div>
                       ) : (
                         <div className="p-6 md:p-16 min-h-[500px] md:min-h-[800px]" ref={guideRef}>
-                          <div className="prose prose-slate max-w-none prose-headings:font-serif prose-headings:font-medium prose-h1:text-center prose-h1:text-3xl md:prose-h1:text-5xl prose-h1:text-[#8B3A3A] prose-h1:mb-2 prose-h2:text-[#8B3A3A] prose-h2:border-b prose-h2:border-[#e5e4e2] prose-h2:pb-2 md:prose-h2:pb-3 prose-h2:mt-8 md:prose-h2:mt-12 prose-h2:text-2xl md:prose-h2:text-3xl prose-h3:text-xl md:prose-h3:text-2xl prose-h3:mt-6 md:prose-h3:mt-8 prose-p:leading-relaxed prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-900 prose-strong:font-semibold">
+                          <div className="prose prose-slate max-w-none prose-headings:font-serif prose-headings:font-medium prose-h1:text-center prose-h1:text-3xl md:prose-h1:text-5xl prose-h1:text-primary prose-h1:mb-2 prose-h2:text-primary prose-h2:border-b prose-h2:border-border prose-h2:pb-2 md:prose-h2:pb-3 prose-h2:mt-8 md:prose-h2:mt-12 prose-h2:text-2xl md:prose-h2:text-3xl prose-h3:text-xl md:prose-h3:text-2xl prose-h3:mt-6 md:prose-h3:mt-8 prose-p:leading-relaxed prose-p:text-slate-700 prose-li:text-slate-700 prose-strong:text-slate-900 prose-strong:font-semibold">
                             <ReactMarkdown>{currentGuide}</ReactMarkdown>
                           </div>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
-                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+                    <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-muted flex items-center justify-center mb-4 md:mb-6">
                         <FileText className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
                       </div>
                       <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">No Guide Synthesized</h3>
@@ -2835,10 +2855,10 @@ export default function App() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6 md:space-y-8"
                 >
-                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-border pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Library</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Library</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                         Archived style guides and synthesis history.
                       </p>
                     </div>
@@ -2855,7 +2875,7 @@ export default function App() {
                       <Button 
                         onClick={() => fileInputRef.current?.click()} 
                         variant="outline"
-                        className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                        className="rounded-full border-border hover:bg-card px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                       >
                         <Upload className="w-4 h-4 mr-2" />
                         Import Guide
@@ -2864,7 +2884,7 @@ export default function App() {
                         onClick={handleSuggestCombination}
                         disabled={selectedGuides.size !== 2 || isSuggestingCombination}
                         variant="outline"
-                        className="rounded-full border-[#8B3A3A]/30 text-[#8B3A3A] hover:bg-[#8B3A3A]/5 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                        className="rounded-full border-primary/30 text-primary hover:bg-primary/5 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                         title="Pick one fanfiction guide and one card guide to see if their styles can combine"
                       >
                         {isSuggestingCombination ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
@@ -2882,17 +2902,17 @@ export default function App() {
                   </div>
 
                   {(isSuggestingCombination || combinationSuggestion) && (
-                    <div className="bg-white border border-[#8B3A3A]/20 rounded-2xl p-5 md:p-7 shadow-sm">
+                    <div className="bg-card border border-primary/20 rounded-2xl p-5 md:p-7 shadow-sm">
                       {isSuggestingCombination ? (
                         <div className="flex items-center gap-3 text-slate-600">
-                          <Loader2 className="w-5 h-5 animate-spin text-[#8B3A3A]" />
+                          <Loader2 className="w-5 h-5 animate-spin text-primary" />
                           <span className="text-sm md:text-base">Analyzing whether these two styles can be combined...</span>
                         </div>
                       ) : combinationSuggestion ? (
                         <div className="space-y-4">
                           <div className="flex items-start justify-between gap-4">
                             <div className="flex items-center gap-3">
-                              <Wand2 className="w-5 h-5 text-[#8B3A3A]" />
+                              <Wand2 className="w-5 h-5 text-primary" />
                               <h3 className="text-lg md:text-xl font-serif font-medium text-slate-900">Combination Analysis</h3>
                               <span className={cn(
                                 "text-[10px] font-semibold uppercase tracking-wider px-2.5 py-1 rounded-full",
@@ -2921,7 +2941,7 @@ export default function App() {
                               <ul className="space-y-1.5">
                                 {combinationSuggestion.recommendations.map((rec, i) => (
                                   <li key={i} className="flex gap-2 text-sm text-slate-700">
-                                    <Check className="w-4 h-4 text-[#8B3A3A] flex-shrink-0 mt-0.5" />
+                                    <Check className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
                                     <span>{rec}</span>
                                   </li>
                                 ))}
@@ -2932,7 +2952,7 @@ export default function App() {
                             <Button
                               onClick={() => { setCombinationSuggestion(null); handleMerge(); }}
                               disabled={selectedGuides.size !== 2 || isGenerating}
-                              className="rounded-full bg-[#8B3A3A] hover:bg-[#7a3333] text-white text-sm px-5"
+                              className="rounded-full bg-primary-solid hover:bg-primary-hover text-white text-sm px-5"
                             >
                               {isGenerating ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Merge className="w-4 h-4 mr-2" />}
                               Create Combined Guide
@@ -2944,8 +2964,8 @@ export default function App() {
                   )}
 
                   {guides.length === 0 ? (
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
-                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4 md:mb-6">
+                    <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-12 md:p-24 flex flex-col items-center justify-center text-center shadow-sm">
+                      <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-muted flex items-center justify-center mb-4 md:mb-6">
                         <BookOpen className="w-6 h-6 md:w-8 md:h-8 text-slate-400" />
                       </div>
                       <h3 className="text-xl md:text-2xl font-serif font-medium text-slate-900">Library Empty</h3>
@@ -2959,8 +2979,8 @@ export default function App() {
                         <div 
                           key={guide.id} 
                           className={cn(
-                            "bg-white border rounded-xl md:rounded-2xl p-4 md:p-6 transition-all shadow-sm hover:shadow-md cursor-pointer",
-                            selectedGuides.has(guide.id) ? "border-[#8B3A3A] ring-1 ring-[#8B3A3A]" : "border-[#e5e4e2]"
+                            "bg-card border rounded-xl md:rounded-2xl p-4 md:p-6 transition-all shadow-sm hover:shadow-md cursor-pointer",
+                            selectedGuides.has(guide.id) ? "border-primary ring-1 ring-primary" : "border-border"
                           )}
                           onClick={() => toggleGuideSelection(guide.id)}
                         >
@@ -2968,7 +2988,7 @@ export default function App() {
                             <div className="flex items-center gap-4">
                               <div className={cn(
                                 "w-5 h-5 rounded-full border flex items-center justify-center transition-colors",
-                                selectedGuides.has(guide.id) ? "bg-[#8B3A3A] border-[#8B3A3A]" : "border-slate-300"
+                                selectedGuides.has(guide.id) ? "bg-primary-solid border-primary" : "border-slate-300"
                               )}>
                                 {selectedGuides.has(guide.id) && <Check className="w-3 h-3 text-white" />}
                               </div>
@@ -2977,7 +2997,7 @@ export default function App() {
                                   <h3 className="font-serif font-medium text-xl text-slate-900">{guide.title}</h3>
                                   <span className={cn(
                                     "inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full",
-                                    guide.source === "fanfic" ? "bg-[#8B3A3A]/10 text-[#8B3A3A]" : "bg-slate-100 text-slate-500"
+                                    guide.source === "fanfic" ? "bg-primary/10 text-primary" : "bg-slate-100 text-slate-500"
                                   )}>
                                     {guide.source === "fanfic" && <Feather className="w-3 h-3" />}
                                     {guide.source === "fanfic" ? "Fanfic" : "Card"}
@@ -3001,7 +3021,7 @@ export default function App() {
                           <div className="flex justify-end">
                             <Button 
                               variant="outline" 
-                              className="rounded-full border-[#e5e4e2] hover:bg-[#f9f8f6]"
+                              className="rounded-full border-border hover:bg-background"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setCurrentGuide(guide.content);
@@ -3032,10 +3052,10 @@ export default function App() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6 md:space-y-8"
                 >
-                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-[#e5e4e2] pb-6 gap-4 md:gap-0">
+                  <div className="flex flex-col md:flex-row md:items-end justify-between border-b border-border pb-6 gap-4 md:gap-0">
                     <div className="space-y-2">
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Card Forge</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Card Forge</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed">
                         Generate a new character card using a saved style guide.
                       </p>
                     </div>
@@ -3044,7 +3064,7 @@ export default function App() {
                         <Button 
                           onClick={() => handleSaveDraft('forge')}
                           variant="outline"
-                          className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                          className="rounded-full border-border hover:bg-slate-50 px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                         >
                           <Save className="w-4 h-4 mr-2" />
                           Save Draft
@@ -3053,7 +3073,7 @@ export default function App() {
                       <Button 
                         onClick={() => setShowSavedCards(!showSavedCards)}
                         variant="outline"
-                        className="rounded-full border-[#e5e4e2] hover:bg-white px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
+                        className="rounded-full border-border hover:bg-card px-4 md:px-6 text-sm md:text-base flex-1 md:flex-none"
                       >
                         <BookOpen className="w-4 h-4 mr-2" />
                         {showSavedCards ? "Back to Forge" : "Saved Cards"}
@@ -3087,7 +3107,7 @@ export default function App() {
                                       if (confirm("Delete this draft?")) {
                                         setSavedDrafts(prev => prev.filter(d => d.id !== draft.id));
                                         if (user) {
-                                          deleteDoc(doc(db, "users", user.uid, "character_drafts", draft.id)).catch(err => handleFirestoreError(err, OperationType.DELETE, "character_drafts"));
+                                          removeDoc(user.uid, "character_drafts", draft.id).catch(err => handleFirestoreError(err, OperationType.DELETE, "character_drafts"));
                                         }
                                       }
                                     }}
@@ -3111,7 +3131,7 @@ export default function App() {
                         </>
                       )}
                       {savedCards.length === 0 && savedDrafts.length === 0 ? (
-                        <div className="text-center py-16 bg-white rounded-3xl border border-[#e5e4e2] shadow-sm">
+                        <div className="text-center py-16 bg-card rounded-3xl border border-border shadow-sm">
                           <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-4" />
                           <h3 className="text-xl font-serif text-slate-900 mb-2">No Saved Cards</h3>
                           <p className="text-slate-500">Cards you forge and save will appear here.</p>
@@ -3121,7 +3141,7 @@ export default function App() {
                           {savedDrafts.length > 0 && <h3 className="text-lg font-serif text-slate-700">Forged Cards</h3>}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                           {savedCards.map(saved => (
-                            <div key={saved.id} className="bg-white border border-[#e5e4e2] rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group cursor-pointer" onClick={() => {
+                            <div key={saved.id} className="bg-card border border-border rounded-2xl p-6 shadow-sm hover:shadow-md transition-all relative group cursor-pointer" onClick={() => {
                                     setForgeName(saved.name);
                                     setForgeConcept(saved.concept);
                                     setForgedCard(saved.card);
@@ -3132,7 +3152,7 @@ export default function App() {
                                   variant="outline"
                                   size="icon"
                                   onClick={(e) => { e.stopPropagation(); exportCardJson(saved.card); }}
-                                  className="h-8 w-8 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700"
+                                  className="h-8 w-8 rounded-full border-border hover:bg-slate-50 hover:text-primary text-slate-700"
                                   title="Download Card"
                                 >
                                   <Download className="w-4 h-4" />
@@ -3147,7 +3167,7 @@ export default function App() {
                                     setForgedCard(saved.card);
                                     setShowSavedCards(false);
                                   }}
-                                  className="h-8 w-8 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700"
+                                  className="h-8 w-8 rounded-full border-border hover:bg-slate-50 hover:text-primary text-slate-700"
                                   title="Load Card"
                                 >
                                   <FileText className="w-4 h-4" />
@@ -3160,11 +3180,11 @@ export default function App() {
                                     if (confirm("Are you sure you want to delete this saved card?")) {
                                       setSavedCards(prev => prev.filter(c => c.id !== saved.id));
                                       if (user) {
-                                        deleteDoc(doc(db, "users", user.uid, "saved_cards", saved.id)).catch(err => handleFirestoreError(err, OperationType.DELETE, "saved_cards"));
+                                        removeDoc(user.uid, "saved_cards", saved.id).catch(err => handleFirestoreError(err, OperationType.DELETE, "saved_cards"));
                                       }
                                     }
                                   }}
-                                  className="h-8 w-8 rounded-full border-[#e5e4e2] hover:bg-red-50 hover:text-red-600 text-slate-700"
+                                  className="h-8 w-8 rounded-full border-border hover:bg-red-50 hover:text-red-600 text-slate-700"
                                   title="Delete Card"
                                 >
                                   <Trash2 className="w-4 h-4" />
@@ -3184,15 +3204,15 @@ export default function App() {
                   ) : (
                     <Tabs value={forgeActiveTab} onValueChange={setForgeActiveTab} className="w-full">
                       <TabsList className="flex flex-col sm:grid w-full sm:grid-cols-5 mb-6 h-auto sm:h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 gap-1 sm:gap-0">
-                        <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Character Details</TabsTrigger>
-                        <TabsTrigger value="vibe" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Vibe Forge</TabsTrigger>
-                        <TabsTrigger value="greeting-studio" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Greeting Studio</TabsTrigger>
-                        <TabsTrigger value="adapt" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Adapt Card</TabsTrigger>
-                        <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-[#8B3A3A] data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Output Preview</TabsTrigger>
+                        <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Character Details</TabsTrigger>
+                        <TabsTrigger value="vibe" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Vibe Forge</TabsTrigger>
+                        <TabsTrigger value="greeting-studio" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Greeting Studio</TabsTrigger>
+                        <TabsTrigger value="adapt" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Adapt Card</TabsTrigger>
+                        <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Output Preview</TabsTrigger>
                       </TabsList>
 
                       <TabsContent value="vibe" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
-                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                        <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
                           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-purple-500/20 via-purple-500 to-purple-500/20"></div>
                           <div className="flex items-center justify-between mb-4">
                             <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Vibe Forge</h3>
@@ -3214,7 +3234,7 @@ export default function App() {
                               placeholder="e.g., A grumpy old wizard who secretly loves cats and baking pastries. He's very cynical but has a soft spot for the user..." 
                               value={vibePrompt}
                               onChange={(e) => setVibePrompt(e.target.value)}
-                              className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-purple-500/50 focus-visible:border-purple-500 transition-all min-h-[150px] resize-y"
+                              className="rounded-xl border-border bg-background hover:bg-card focus:bg-card focus-visible:ring-2 focus-visible:ring-purple-500/50 focus-visible:border-purple-500 transition-all min-h-[150px] resize-y"
                             />
                           </div>
 
@@ -3248,8 +3268,8 @@ export default function App() {
                       </TabsContent>
 
                       <TabsContent value="details" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
-                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
-                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-[#8B3A3A]/20 via-[#8B3A3A] to-[#8B3A3A]/20"></div>
+                        <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary/20 via-primary to-primary/20"></div>
                       <div className="flex items-center justify-between mb-4">
                         <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Character Details</h3>
                         <div className="flex items-center gap-2">
@@ -3257,7 +3277,7 @@ export default function App() {
                             variant="outline"
                             size="sm"
                             onClick={() => document.getElementById('forge-card-upload')?.click()}
-                            className="h-8 px-3 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            className="h-8 px-3 text-slate-600 border-border hover:bg-slate-50 hover:text-primary transition-colors"
                             title="Upload an existing character card"
                           >
                             <Upload className="w-4 h-4 mr-1" />
@@ -3275,7 +3295,7 @@ export default function App() {
                             size="sm"
                             onClick={forgeHistory.undo}
                             disabled={!forgeHistory.canUndo}
-                            className="h-8 px-2 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            className="h-8 px-2 text-slate-600 border-border hover:bg-slate-50 hover:text-primary transition-colors"
                             title="Undo (Ctrl+Z)"
                           >
                             <Undo2 className="w-4 h-4" />
@@ -3285,7 +3305,7 @@ export default function App() {
                             size="sm"
                             onClick={forgeHistory.redo}
                             disabled={!forgeHistory.canRedo}
-                            className="h-8 px-2 text-slate-600 border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            className="h-8 px-2 text-slate-600 border-border hover:bg-slate-50 hover:text-primary transition-colors"
                             title="Redo (Ctrl+Y)"
                           >
                             <Redo2 className="w-4 h-4" />
@@ -3294,7 +3314,7 @@ export default function App() {
                       </div>
 
                       {forgeBaseCard && (
-                        <div className="rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] p-3 text-xs text-slate-600">
+                        <div className="rounded-xl border border-border bg-background p-3 text-xs text-slate-600">
                           Loaded base card: <span className="font-semibold text-slate-800">{forgeBaseCard.name || "Unnamed Card"}</span>.  
                           You can now alternate it by selecting a style guide/template and using per-field AI or auto-fill.
                         </div>
@@ -3309,7 +3329,7 @@ export default function App() {
                           id="guideSelect"
                           value={forgeSelectedGuide}
                           onChange={(e) => setForgeSelectedGuide(e.target.value)}
-                          className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
+                          className="flex h-11 w-full rounded-xl border border-border bg-background hover:bg-card focus:bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary transition-all"
                         >
                           <option value="" disabled>Select a saved guide...</option>
                           <GuideOptions guides={guides} />
@@ -3329,7 +3349,7 @@ export default function App() {
                             id="templateSelect"
                             value={forgeSelectedTemplate}
                             onChange={(e) => setForgeSelectedTemplate(e.target.value)}
-                            className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
+                            className="flex h-11 w-full rounded-xl border border-border bg-background hover:bg-card focus:bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary transition-all"
                           >
                             <option value="">None (Use Style Guide)</option>
                             <optgroup label="Default Templates">
@@ -3348,7 +3368,7 @@ export default function App() {
                           {forgeSelectedTemplate && (
                             <Button
                               variant="outline"
-                              className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                              className="h-11 px-3 border-border text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
                               onClick={() => openTemplateEditor(forgeSelectedTemplate)}
                               title={forgeSelectedTemplate.startsWith('custom-') ? "Edit Template" : "Edit as Custom Template"}
                             >
@@ -3357,7 +3377,7 @@ export default function App() {
                           )}
                           <Button
                             variant="outline"
-                            className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            className="h-11 px-3 border-border text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
                             onClick={() => openTemplateEditor()}
                             title="Create New Template"
                           >
@@ -3365,7 +3385,7 @@ export default function App() {
                           </Button>
                           <Button
                             variant="outline"
-                            className="h-11 px-3 border-[#e5e4e2] text-slate-600 hover:bg-slate-50 hover:text-[#8B3A3A] transition-colors"
+                            className="h-11 px-3 border-border text-slate-600 hover:bg-slate-50 hover:text-primary transition-colors"
                             onClick={() => document.getElementById('template-upload')?.click()}
                             title="Upload Custom Template"
                           >
@@ -3401,7 +3421,7 @@ export default function App() {
                           placeholder="e.g. Silas Thorne"
                           value={forgeName}
                           onChange={(e) => setForgeName(e.target.value)}
-                          className="h-11 rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all"
+                          className="h-11 rounded-xl border-border bg-background hover:bg-card focus:bg-card focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary transition-all"
                         />
                       </div>
 
@@ -3417,14 +3437,14 @@ export default function App() {
                               placeholder="e.g. The Cold Grumpy Alpha / Brooding Bodyguard"
                               value={forgeConcept}
                               onChange={(e) => setForgeConcept(e.target.value)}
-                              className="h-11 rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all flex-1"
+                              className="h-11 rounded-xl border-border bg-background hover:bg-card focus:bg-card focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary transition-all flex-1"
                               autoComplete="off"
                             />
                             <Button
                               variant="outline"
                               size="icon"
                               onClick={handleRandomizeArchetype}
-                              className="h-11 w-11 rounded-xl border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-500 transition-colors shrink-0"
+                              className="h-11 w-11 rounded-xl border-border hover:bg-slate-50 hover:text-primary text-slate-500 transition-colors shrink-0"
                               title="Randomize Archetype"
                             >
                               <Dices className="w-5 h-5" />
@@ -3433,7 +3453,7 @@ export default function App() {
                               variant="outline"
                               onClick={handleSuggestArchetype}
                               disabled={isSuggestingArchetype || forgeSlots.length === 0}
-                              className="h-11 text-[#8B3A3A] border-[#e5e4e2] hover:bg-[#8B3A3A]/10 px-4"
+                              className="h-11 text-primary border-border hover:bg-primary/10 px-4"
                             >
                               {isSuggestingArchetype ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
                               Auto-Suggest Archetype
@@ -3464,7 +3484,7 @@ export default function App() {
                       )}
 
                       {forgeSlots.length > 0 && (
-                        <div className="flex flex-col gap-4 pt-4 pb-4 border-b border-[#e5e4e2] mb-4">
+                        <div className="flex flex-col gap-4 pt-4 pb-4 border-b border-border mb-4">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                             <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider">Character Details</h3>
                             <div className="flex justify-start sm:justify-end">
@@ -3488,7 +3508,7 @@ export default function App() {
                               placeholder="e.g., Make the personality traits focus on their dark past, and make the appearance very gothic..."
                               value={autoFillVibe}
                               onChange={(e) => setAutoFillVibe(e.target.value)}
-                              className="h-20 text-sm bg-white rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A]"
+                              className="h-20 text-sm bg-card rounded-xl border-border focus-visible:ring-primary/50 focus-visible:border-primary"
                             />
                             <div className="flex justify-end">
                               <Button 
@@ -3496,7 +3516,7 @@ export default function App() {
                                 size="sm" 
                                 onClick={handleAutoFill}
                                 disabled={isAutoFilling || isExtractingSlots || !forgeName || !forgeConcept}
-                                className="h-9 px-4 text-xs text-[#8B3A3A] border-[#8B3A3A]/30 hover:bg-[#8B3A3A]/10 rounded-lg"
+                                className="h-9 px-4 text-xs text-primary border-primary/30 hover:bg-primary/10 rounded-lg"
                               >
                                 {isAutoFilling ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
                                 Auto-Fill Empty Fields
@@ -3507,8 +3527,8 @@ export default function App() {
                       )}
 
                       {isExtractingSlots ? (
-                        <div className="flex items-center justify-center py-12 text-slate-500 bg-[#f9f8f6] rounded-xl border border-dashed border-[#e5e4e2]">
-                          <Loader2 className="w-6 h-6 animate-spin mr-2 text-[#8B3A3A]" />
+                        <div className="flex items-center justify-center py-12 text-slate-500 bg-background rounded-xl border border-dashed border-border">
+                          <Loader2 className="w-6 h-6 animate-spin mr-2 text-primary" />
                           <span className="font-medium">Extracting character details...</span>
                         </div>
                       ) : (
@@ -3524,14 +3544,14 @@ export default function App() {
                                   placeholder={`Vibe for ${slot.name}...`}
                                   value={slotVibes[index] || ""}
                                   onChange={(e) => setSlotVibes(prev => ({ ...prev, [index]: e.target.value }))}
-                                  className="h-8 text-xs bg-slate-50 border-slate-200 w-full sm:w-48 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A]"
+                                  className="h-8 text-xs bg-slate-50 border-slate-200 w-full sm:w-48 focus-visible:ring-primary/50 focus-visible:border-primary"
                                 />
                                 <Button
                                   variant="ghost"
                                   size="sm"
                                   onClick={() => handleGenerateSlot(index)}
                                   disabled={generatingSlotIndex === index || !forgeSelectedGuide}
-                                  className="h-8 text-xs text-[#8B3A3A] hover:bg-[#8B3A3A]/10 px-3 shrink-0"
+                                  className="h-8 text-xs text-primary hover:bg-primary/10 px-3 shrink-0"
                                   title={!forgeSelectedGuide ? "Select a style guide first" : "Auto-generate content for this field"}
                                 >
                                   {generatingSlotIndex === index ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Wand2 className="w-3 h-3 mr-1" />}
@@ -3548,14 +3568,14 @@ export default function App() {
                                 newSlots[index] = { ...newSlots[index], value: e.target.value };
                                 setForgeSlots(newSlots);
                               }}
-                              className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all min-h-[100px] resize-y"
+                              className="rounded-xl border-border bg-background hover:bg-card focus:bg-card focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary transition-all min-h-[100px] resize-y"
                             />
                           </div>
                         ))
                       )}
 
                       {(!isExtractingSlots && forgeSlots.length > 0) && (
-                        <div className="space-y-2 mt-4 pt-4 border-t border-[#e5e4e2]">
+                        <div className="space-y-2 mt-4 pt-4 border-t border-border">
                           <Label htmlFor="first-message-idea" className="text-slate-700 font-medium flex items-center tracking-wide text-sm uppercase">
                             First Message / Scenario Idea
                             <InfoTooltip text="Provide a general idea or scenario for the character's first message. The AI will use this to generate the 'first_mes' and 'scenario' fields." />
@@ -3565,13 +3585,32 @@ export default function App() {
                             placeholder="e.g., The character meets the user in a dark alleyway..." 
                             value={forgeFirstMessageIdea}
                             onChange={(e) => setForgeFirstMessageIdea(e.target.value)}
-                            className="rounded-xl border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white focus-visible:ring-2 focus-visible:ring-[#8B3A3A]/50 focus-visible:border-[#8B3A3A] transition-all min-h-[100px] resize-y"
+                            className="rounded-xl border-border bg-background hover:bg-card focus:bg-card focus-visible:ring-2 focus-visible:ring-primary/50 focus-visible:border-primary transition-all min-h-[100px] resize-y"
                           />
                         </div>
                       )}
 
                       <div className="flex flex-col gap-2 mt-4">
-                        <div className="flex justify-end">
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-2">
+                            <Label htmlFor="forge-token-limit" className="text-xs font-bold tracking-widest text-slate-400 uppercase whitespace-nowrap">
+                              Token Limit
+                            </Label>
+                            <InfoTooltip text="Set a target token count for the generated card. Leave at 0 or empty for no limit. Typical cards range from 500–2000 tokens." />
+                            <Input
+                              id="forge-token-limit"
+                              type="number"
+                              min={0}
+                              step={100}
+                              placeholder="No limit"
+                              value={forgeTokenLimit === 0 ? "" : forgeTokenLimit}
+                              onChange={(e) => {
+                                const n = parseInt(e.target.value, 10);
+                                setForgeTokenLimit(Number.isFinite(n) ? Math.max(0, n) : 0);
+                              }}
+                              className="w-28 h-8 text-xs rounded-lg border-border bg-background focus-visible:ring-primary/50"
+                            />
+                          </div>
                           <ConfiguredModelSelector apiKeys={apiKeys}
                             sectionId="forge_generate"
                             globalProvider={provider}
@@ -3606,7 +3645,7 @@ export default function App() {
                         <Button
                           onClick={handleForgeCard}
                           disabled={isForging}
-                          className="w-full rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white py-6 text-lg shadow-md shadow-[#8B3A3A]/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                          className="w-full rounded-xl bg-primary-solid hover:bg-primary-hover text-white py-6 text-lg shadow-md shadow-primary/20 transition-all hover:scale-[1.02] active:scale-[0.98]"
                         >
                           {isForging ? <Loader2 className="w-5 h-5 mr-2 animate-spin" /> : <Wand2 className="w-5 h-5 mr-2" />}
                           {isForging ? "Forging..." : "Forge Character"}
@@ -3617,7 +3656,7 @@ export default function App() {
 
                       {/* Greeting Studio — vibe-style greeting generation for saved or uploaded cards */}
                       <TabsContent value="greeting-studio" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
-                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                        <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
                           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500/20 via-emerald-500 to-emerald-500/20"></div>
                           <div className="flex items-center justify-between mb-4">
                             <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Greeting Studio</h3>
@@ -3657,7 +3696,7 @@ export default function App() {
                               <select
                                 value={studioSelectedCardId}
                                 onChange={(e) => setStudioSelectedCardId(e.target.value)}
-                                className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
+                                className="flex h-11 w-full rounded-xl border border-border bg-background hover:bg-card focus:bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
                               >
                                 <option value="" disabled>Pick a saved card...</option>
                                 {savedCards.map((c) => (
@@ -3677,7 +3716,7 @@ export default function App() {
                                 type="file"
                                 accept=".json,.png"
                                 onChange={handleStudioCardUpload}
-                                className="rounded-xl bg-[#f9f8f6] hover:bg-white border-[#e5e4e2]"
+                                className="rounded-xl bg-background hover:bg-card border-border"
                               />
                               {studioUploadedCard && (
                                 <p className="text-xs text-slate-600 mt-1">Loaded: <span className="font-semibold">{studioUploadedCard.name || "Unnamed Card"}</span></p>
@@ -3692,7 +3731,7 @@ export default function App() {
                             <select
                               value={studioSelectedGuide}
                               onChange={(e) => setStudioSelectedGuide(e.target.value)}
-                              className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
+                              className="flex h-11 w-full rounded-xl border border-border bg-background hover:bg-card focus:bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-600/50 focus-visible:border-emerald-600 transition-all"
                             >
                               <option value="">No style guide (use card's natural voice)</option>
                               <GuideOptions guides={guides} />
@@ -3708,7 +3747,7 @@ export default function App() {
                               placeholder="e.g., The character returns home after a long journey and finds the user waiting in the kitchen, making tea. They're emotional but trying to hide it..."
                               value={studioVibePrompt}
                               onChange={(e) => setStudioVibePrompt(e.target.value)}
-                              className="bg-[#f9f8f6] hover:bg-white focus:bg-white border-[#e5e4e2] rounded-xl min-h-[100px]"
+                              className="bg-background hover:bg-card focus:bg-card border-border rounded-xl min-h-[100px]"
                             />
                           </div>
 
@@ -3740,7 +3779,7 @@ export default function App() {
                           </Button>
 
                           {studioGeneratedGreeting && !isStudioGenerating && (
-                            <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
+                            <div className="space-y-3 pt-4 border-t border-border">
                               <div className="flex items-center justify-between">
                                 <h4 className="text-sm font-bold tracking-widest text-emerald-700 uppercase">Generated Greeting</h4>
                                 <div className="flex items-center gap-2">
@@ -3752,7 +3791,7 @@ export default function App() {
                               <Textarea
                                 value={studioGeneratedGreeting}
                                 onChange={(e) => setStudioGeneratedGreeting(e.target.value)}
-                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px]"
+                                className="bg-background p-5 rounded-2xl text-sm text-slate-700 font-mono border border-border/50 shadow-inner min-h-[150px]"
                               />
                               <Button
                                 onClick={handleStudioAppendToCard}
@@ -3768,7 +3807,7 @@ export default function App() {
 
                       {/* Adapt Card — paste off-platform card text and rewrite to style guide */}
                       <TabsContent value="adapt" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
-                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
+                        <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 space-y-5 md:space-y-7 relative overflow-hidden">
                           <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-cyan-500/20 via-cyan-500 to-cyan-500/20"></div>
                           <div className="flex items-center justify-between mb-4">
                             <h3 className="font-serif font-medium text-2xl md:text-3xl text-slate-900 tracking-tight">Adapt Card</h3>
@@ -3790,7 +3829,7 @@ export default function App() {
                               placeholder="Paste your character card here — JSON, bracketed format, W++, or plain text all work..."
                               value={adaptRawText}
                               onChange={(e) => setAdaptRawText(e.target.value)}
-                              className="bg-[#f9f8f6] hover:bg-white focus:bg-white border-[#e5e4e2] rounded-xl min-h-[200px] font-mono text-sm"
+                              className="bg-background hover:bg-card focus:bg-card border-border rounded-xl min-h-[200px] font-mono text-sm"
                             />
                           </div>
 
@@ -3801,7 +3840,7 @@ export default function App() {
                             <select
                               value={adaptSelectedGuide}
                               onChange={(e) => setAdaptSelectedGuide(e.target.value)}
-                              className="flex h-11 w-full rounded-xl border border-[#e5e4e2] bg-[#f9f8f6] hover:bg-white focus:bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/50 focus-visible:border-cyan-600 transition-all"
+                              className="flex h-11 w-full rounded-xl border border-border bg-background hover:bg-card focus:bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-cyan-600/50 focus-visible:border-cyan-600 transition-all"
                             >
                               <option value="" disabled>Pick a style guide...</option>
                               <GuideOptions guides={guides} />
@@ -3839,7 +3878,7 @@ export default function App() {
                           </Button>
 
                           {adaptedCard && !isAdapting && (
-                            <div className="space-y-4 pt-4 border-t border-[#e5e4e2]">
+                            <div className="space-y-4 pt-4 border-t border-border">
                               <div className="flex items-center justify-between">
                                 <h4 className="text-sm font-bold tracking-widest text-cyan-700 uppercase">Adapted Card</h4>
                                 <div className="flex items-center gap-2">
@@ -3848,7 +3887,7 @@ export default function App() {
                                     size="sm"
                                     onClick={handleAdaptGenerateGreeting}
                                     disabled={isAdapting}
-                                    className="rounded-full border-[#e5e4e2] hover:bg-cyan-50 hover:text-cyan-700"
+                                    className="rounded-full border-border hover:bg-cyan-50 hover:text-cyan-700"
                                   >
                                     <Plus className="w-3 h-3 mr-1" />
                                     New Greeting
@@ -3857,7 +3896,7 @@ export default function App() {
                                     variant="outline"
                                     size="sm"
                                     onClick={handleLoadAdaptedCard}
-                                    className="rounded-full border-[#e5e4e2] hover:bg-cyan-50 hover:text-cyan-700"
+                                    className="rounded-full border-border hover:bg-cyan-50 hover:text-cyan-700"
                                   >
                                     <FileText className="w-3 h-3 mr-1" />
                                     Load into Preview
@@ -3872,21 +3911,21 @@ export default function App() {
                                 </div>
                                 <div>
                                   <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Description</span>
-                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.description}</p>
+                                  <p className="text-sm text-slate-700 bg-background p-3 rounded-xl border border-border/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.description}</p>
                                 </div>
                                 <div>
                                   <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Personality</span>
-                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.personality}</p>
+                                  <p className="text-sm text-slate-700 bg-background p-3 rounded-xl border border-border/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto">{adaptedCard.personality}</p>
                                 </div>
                                 <div>
                                   <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">First Message</span>
-                                  <p className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{adaptedCard.first_mes}</p>
+                                  <p className="text-sm text-slate-700 bg-background p-3 rounded-xl border border-border/50 whitespace-pre-wrap font-mono max-h-40 overflow-y-auto">{adaptedCard.first_mes}</p>
                                 </div>
                                 {adaptedCard.alternate_greetings && adaptedCard.alternate_greetings.length > 0 && (
                                   <div>
                                     <span className="text-xs text-slate-400 font-mono uppercase tracking-widest">Alternate Greetings ({adaptedCard.alternate_greetings.length})</span>
                                     {adaptedCard.alternate_greetings.map((g, idx) => (
-                                      <p key={idx} className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto mt-2">
+                                      <p key={idx} className="text-sm text-slate-700 bg-background p-3 rounded-xl border border-border/50 whitespace-pre-wrap font-mono max-h-32 overflow-y-auto mt-2">
                                         <span className="text-xs text-slate-400 font-bold">Greeting {idx + 2}:</span> {g}
                                       </p>
                                     ))}
@@ -3900,7 +3939,7 @@ export default function App() {
 
                       {/* Output Preview */}
                       <TabsContent value="preview" className="mt-0 focus-visible:outline-none focus-visible:ring-0 h-full">
-                        <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
+                        <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 md:mb-6 gap-4 sm:gap-0">
                         <div className="flex items-center gap-3">
@@ -3920,7 +3959,7 @@ export default function App() {
                                   size="icon"
                                   onClick={forgedCardHistory.undo}
                                   disabled={!forgedCardHistory.canUndo}
-                                  className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                                  className="h-9 w-9 rounded-full border-border hover:bg-slate-50 hover:text-primary text-slate-700 transition-colors"
                                   title="Undo Generated Card"
                                 >
                                   <Undo2 className="w-4 h-4" />
@@ -3930,7 +3969,7 @@ export default function App() {
                                   size="icon"
                                   onClick={forgedCardHistory.redo}
                                   disabled={!forgedCardHistory.canRedo}
-                                  className="h-9 w-9 rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                                  className="h-9 w-9 rounded-full border-border hover:bg-slate-50 hover:text-primary text-slate-700 transition-colors"
                                   title="Redo Generated Card"
                                 >
                                   <Redo2 className="w-4 h-4" />
@@ -3940,7 +3979,7 @@ export default function App() {
                             <Button 
                               onClick={saveForgedCard}
                               variant="outline"
-                              className="flex-1 sm:flex-none rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                              className="flex-1 sm:flex-none rounded-full border-border hover:bg-slate-50 hover:text-primary text-slate-700 transition-colors"
                             >
                               <Save className="w-4 h-4 mr-2" />
                               Save
@@ -3948,7 +3987,7 @@ export default function App() {
                             <Button 
                               onClick={downloadForgedCard}
                               variant="outline"
-                              className="flex-1 sm:flex-none rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A] text-slate-700 transition-colors"
+                              className="flex-1 sm:flex-none rounded-full border-border hover:bg-slate-50 hover:text-primary text-slate-700 transition-colors"
                             >
                               <Download className="w-4 h-4 mr-2" />
                               Download
@@ -3959,7 +3998,7 @@ export default function App() {
 
                       {isForging ? (
                         <div className="flex-1 flex flex-col items-center justify-center text-center py-8 md:py-12">
-                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-primary animate-spin mb-4 md:mb-6" />
                           <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Forging Character...</h4>
                           <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
                             Applying style guide rules to generate description, personality, and first message.
@@ -3973,7 +4012,7 @@ export default function App() {
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                                 <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
-                                  <ImageIcon className="w-4 h-4 text-[#8B3A3A]" />
+                                  <ImageIcon className="w-4 h-4 text-primary" />
                                   Character Portrait
                                 </h4>
                                 <div className="flex justify-start sm:justify-end">
@@ -3996,14 +4035,14 @@ export default function App() {
                                     value={imagePrompt}
                                     onChange={(e) => setImagePrompt(e.target.value)}
                                     placeholder="Click 'Generate Prompt' or write your own Midjourney/Niji prompt here..."
-                                    className="bg-white p-3 rounded-xl text-xs text-slate-700 font-mono border border-slate-200 min-h-[100px] focus-visible:ring-[#8B3A3A]/50"
+                                    className="bg-card p-3 rounded-xl text-xs text-slate-700 font-mono border border-slate-200 min-h-[100px] focus-visible:ring-primary/50"
                                   />
                                   <div className="flex gap-2">
                                     <Button 
                                       onClick={handleGenerateImagePrompt} 
                                       disabled={isGeneratingImagePrompt}
                                       variant="outline"
-                                      className="flex-1 rounded-xl text-xs h-9 border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A]"
+                                      className="flex-1 rounded-xl text-xs h-9 border-slate-200 hover:bg-slate-100 hover:text-primary"
                                     >
                                       {isGeneratingImagePrompt ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
                                       Generate Prompt
@@ -4017,23 +4056,23 @@ export default function App() {
                             <div className="bg-slate-50 border border-slate-200 rounded-2xl p-5 space-y-4">
                               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 sm:gap-0">
                                 <h4 className="text-sm font-bold tracking-widest text-slate-700 uppercase flex items-center gap-2">
-                                  <Music className="w-4 h-4 text-[#8B3A3A]" />
+                                  <Music className="w-4 h-4 text-primary" />
                                   Theme Song Suggestion
                                 </h4>
                                 <Button 
                                   onClick={handleSuggestSong} 
                                   disabled={isSuggestingSong}
                                   variant="outline"
-                                  className="h-8 text-xs border-slate-200 hover:bg-slate-100 hover:text-[#8B3A3A] w-full sm:w-auto"
+                                  className="h-8 text-xs border-slate-200 hover:bg-slate-100 hover:text-primary w-full sm:w-auto"
                                 >
                                   {isSuggestingSong ? <Loader2 className="w-3 h-3 mr-2 animate-spin" /> : <Wand2 className="w-3 h-3 mr-2" />}
                                   Suggest Theme Song
                                 </Button>
                               </div>
                               {suggestedSong && (
-                                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                                <div className="bg-card p-4 rounded-xl border border-slate-200 shadow-sm">
                                   <div className="flex items-start gap-3">
-                                    <div className="bg-slate-100 p-2 rounded-lg text-[#8B3A3A]">
+                                    <div className="bg-slate-100 p-2 rounded-lg text-primary">
                                       <Music className="w-5 h-5" />
                                     </div>
                                     <div>
@@ -4051,7 +4090,7 @@ export default function App() {
                               <Input 
                                 value={forgedCard.name}
                                 onChange={(e) => setForgedCard({ ...forgedCard, name: e.target.value })}
-                                className="text-slate-900 font-medium text-lg h-10 bg-[#f9f8f6] border-[#e5e4e2]/50 focus-visible:ring-[#8B3A3A]/50"
+                                className="text-slate-900 font-medium text-lg h-10 bg-background border-border/50 focus-visible:ring-primary/50"
                               />
                             </div>
                             
@@ -4060,7 +4099,7 @@ export default function App() {
                                 <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Description</h4>
                                 <div className="flex items-center gap-3">
                                   <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.description)} tokens</span>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.description)}>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-primary" onClick={() => copyToClipboard(forgedCard.description)}>
                                     <Copy className="w-3 h-3" />
                                   </Button>
                                 </div>
@@ -4068,7 +4107,7 @@ export default function App() {
                               <Textarea 
                                 value={forgedCard.description}
                                 onChange={(e) => setForgedCard({ ...forgedCard, description: e.target.value })}
-                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px] focus-visible:ring-[#8B3A3A]/50"
+                                className="bg-background p-5 rounded-2xl text-sm text-slate-700 font-mono border border-border/50 shadow-inner min-h-[150px] focus-visible:ring-primary/50"
                               />
                             </div>
 
@@ -4077,7 +4116,7 @@ export default function App() {
                                 <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Personality</h4>
                                 <div className="flex items-center gap-3">
                                   <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.personality)} tokens</span>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.personality)}>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-primary" onClick={() => copyToClipboard(forgedCard.personality)}>
                                     <Copy className="w-3 h-3" />
                                   </Button>
                                 </div>
@@ -4085,7 +4124,7 @@ export default function App() {
                               <Textarea 
                                 value={forgedCard.personality}
                                 onChange={(e) => setForgedCard({ ...forgedCard, personality: e.target.value })}
-                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[100px] focus-visible:ring-[#8B3A3A]/50"
+                                className="bg-background p-5 rounded-2xl text-sm text-slate-700 font-mono border border-border/50 shadow-inner min-h-[100px] focus-visible:ring-primary/50"
                               />
                             </div>
 
@@ -4094,7 +4133,7 @@ export default function App() {
                                 <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">First Message</h4>
                                 <div className="flex items-center gap-3">
                                   <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.first_mes)} tokens</span>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.first_mes)}>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-primary" onClick={() => copyToClipboard(forgedCard.first_mes)}>
                                     <Copy className="w-3 h-3" />
                                   </Button>
                                 </div>
@@ -4102,7 +4141,7 @@ export default function App() {
                               <Textarea
                                 value={forgedCard.first_mes}
                                 onChange={(e) => setForgedCard({ ...forgedCard, first_mes: e.target.value })}
-                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px] focus-visible:ring-[#8B3A3A]/50"
+                                className="bg-background p-5 rounded-2xl text-sm text-slate-700 font-mono border border-border/50 shadow-inner min-h-[150px] focus-visible:ring-primary/50"
                               />
                             </div>
 
@@ -4114,7 +4153,7 @@ export default function App() {
                                   size="sm"
                                   onClick={handleGenerateGreeting}
                                   disabled={isGeneratingGreeting}
-                                  className="h-7 text-xs rounded-full border-[#e5e4e2] hover:bg-slate-50 hover:text-[#8B3A3A]"
+                                  className="h-7 text-xs rounded-full border-border hover:bg-slate-50 hover:text-primary"
                                 >
                                   {isGeneratingGreeting ? <Loader2 className="w-3 h-3 mr-1 animate-spin" /> : <Plus className="w-3 h-3 mr-1" />}
                                   {isGeneratingGreeting ? "Generating..." : "Generate Greeting"}
@@ -4133,7 +4172,7 @@ export default function App() {
                                   <div className="flex items-center justify-between mb-1">
                                     <span className="text-xs text-slate-400 font-mono">Greeting {idx + 2} &middot; ~{estimateTokens(greeting)} tokens</span>
                                     <div className="flex items-center gap-1">
-                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(greeting)}>
+                                      <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-primary" onClick={() => copyToClipboard(greeting)}>
                                         <Copy className="w-3 h-3" />
                                       </Button>
                                       <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-red-500" onClick={() => {
@@ -4152,7 +4191,7 @@ export default function App() {
                                       updated[idx] = e.target.value;
                                       setForgedCard({ ...forgedCard, alternate_greetings: updated });
                                     }}
-                                    className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[120px] focus-visible:ring-[#8B3A3A]/50"
+                                    className="bg-background p-5 rounded-2xl text-sm text-slate-700 font-mono border border-border/50 shadow-inner min-h-[120px] focus-visible:ring-primary/50"
                                   />
                                 </div>
                               ))}
@@ -4163,7 +4202,7 @@ export default function App() {
                                 <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Scenario</h4>
                                 <div className="flex items-center gap-3">
                                   <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.scenario || "")} tokens</span>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.scenario || "")}>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-primary" onClick={() => copyToClipboard(forgedCard.scenario || "")}>
                                     <Copy className="w-3 h-3" />
                                   </Button>
                                 </div>
@@ -4171,7 +4210,7 @@ export default function App() {
                               <Textarea 
                                 value={forgedCard.scenario || ""}
                                 onChange={(e) => setForgedCard({ ...forgedCard, scenario: e.target.value })}
-                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[100px] focus-visible:ring-[#8B3A3A]/50"
+                                className="bg-background p-5 rounded-2xl text-sm text-slate-700 font-mono border border-border/50 shadow-inner min-h-[100px] focus-visible:ring-primary/50"
                               />
                             </div>
 
@@ -4180,7 +4219,7 @@ export default function App() {
                                 <h4 className="text-xs font-bold tracking-widest text-slate-400 uppercase">Example Messages</h4>
                                 <div className="flex items-center gap-3">
                                   <span className="text-xs text-slate-400 font-mono">~{estimateTokens(forgedCard.mes_example || "")} tokens</span>
-                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-[#8B3A3A]" onClick={() => copyToClipboard(forgedCard.mes_example || "")}>
+                                  <Button variant="ghost" size="icon" className="h-6 w-6 text-slate-400 hover:text-primary" onClick={() => copyToClipboard(forgedCard.mes_example || "")}>
                                     <Copy className="w-3 h-3" />
                                   </Button>
                                 </div>
@@ -4188,7 +4227,7 @@ export default function App() {
                               <Textarea 
                                 value={forgedCard.mes_example || ""}
                                 onChange={(e) => setForgedCard({ ...forgedCard, mes_example: e.target.value })}
-                                className="bg-[#f9f8f6] p-5 rounded-2xl text-sm text-slate-700 font-mono border border-[#e5e4e2]/50 shadow-inner min-h-[150px] focus-visible:ring-[#8B3A3A]/50"
+                                className="bg-background p-5 rounded-2xl text-sm text-slate-700 font-mono border border-border/50 shadow-inner min-h-[150px] focus-visible:ring-primary/50"
                               />
                             </div>
                           </div>
@@ -4196,16 +4235,16 @@ export default function App() {
                       ) : (
                         <ScrollArea className="flex-1 -mx-4 px-4">
                           <div className="space-y-6 pb-4">
-                            <div className="bg-white border border-[#e5e4e2] rounded-2xl p-6 relative overflow-hidden shadow-sm">
-                              <div className="absolute top-0 right-0 bg-slate-100 text-slate-500 text-[10px] font-bold px-3 py-1 rounded-bl-lg uppercase tracking-widest border-b border-l border-[#e5e4e2]">Live Preview</div>
+                            <div className="bg-card border border-border rounded-2xl p-6 relative overflow-hidden shadow-sm">
+                              <div className="absolute top-0 right-0 bg-slate-100 text-slate-500 text-[10px] font-bold px-3 py-1 rounded-bl-lg uppercase tracking-widest border-b border-l border-border">Live Preview</div>
                               
                               <div className="flex items-center gap-4 mb-6 mt-2">
-                                <div className="w-16 h-16 rounded-full bg-slate-100 border border-[#e5e4e2] flex items-center justify-center overflow-hidden shrink-0">
+                                <div className="w-16 h-16 rounded-full bg-slate-100 border border-border flex items-center justify-center overflow-hidden shrink-0">
                                   <ImageIcon className="w-8 h-8 text-slate-300" />
                                 </div>
                                 <div className="overflow-hidden">
                                   <h2 className="text-2xl font-serif font-medium text-slate-900 truncate">{forgeName || "Character Name"}</h2>
-                                  <p className="text-sm text-[#8B3A3A] font-medium truncate">{forgeConcept || "Core Concept / Archetype"}</p>
+                                  <p className="text-sm text-primary font-medium truncate">{forgeConcept || "Core Concept / Archetype"}</p>
                                 </div>
                               </div>
 
@@ -4214,7 +4253,7 @@ export default function App() {
                                   {forgeSlots.map((slot, idx) => (
                                     <div key={idx}>
                                       <h4 className="text-[10px] font-bold tracking-widest text-slate-400 uppercase mb-1">{slot.name}</h4>
-                                      <div className="text-sm text-slate-700 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]/50 min-h-[40px] whitespace-pre-wrap font-mono">
+                                      <div className="text-sm text-slate-700 bg-background p-3 rounded-xl border border-border/50 min-h-[40px] whitespace-pre-wrap font-mono">
                                         {slot.value || <span className="text-slate-400 italic">Empty</span>}
                                       </div>
                                     </div>
@@ -4251,10 +4290,10 @@ export default function App() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6 md:space-y-8 h-full flex flex-col"
                 >
-                  <div className="border-b border-[#e5e4e2] pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                  <div className="border-b border-border pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Universe Map</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Universe Map</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed mt-2">
                         Visualize character relationships and extract shared universes.
                       </p>
                     </div>
@@ -4262,7 +4301,7 @@ export default function App() {
                       <Button 
                         onClick={() => handleSaveDraft('app')}
                         variant="outline"
-                        className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
+                        className="rounded-full border-border hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
                       >
                         <Save className="w-4 h-4 mr-2" />
                         Save Draft
@@ -4280,7 +4319,7 @@ export default function App() {
                   </div>
 
                   <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+                    <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
                       <div className="flex flex-col md:flex-row gap-4 items-end">
                         <div className="space-y-2 flex-1 w-full">
                           <Label htmlFor="universeGuideSelect" className="text-slate-700 font-medium flex items-center">
@@ -4290,7 +4329,7 @@ export default function App() {
                             id="universeGuideSelect"
                             value={universeSelectedGuide}
                             onChange={(e) => setUniverseSelectedGuide(e.target.value)}
-                            className="flex h-10 w-full rounded-xl border border-[#e5e4e2] bg-white px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                            className="flex h-10 w-full rounded-xl border border-border bg-card px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                           >
                             <option value="">No guide selected (Use cards only)</option>
                             <GuideOptions guides={guides} />
@@ -4299,7 +4338,7 @@ export default function App() {
                         <Button 
                           onClick={handleExtractUniverse} 
                           disabled={isExtractingUniverse || (!universeSelectedGuide && universeSelectedCards.size === 0)} 
-                          className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
+                          className="w-full md:w-auto rounded-xl bg-primary-solid hover:bg-primary-hover text-white h-10 px-6 shadow-md shadow-primary/20 transition-all"
                         >
                           {isExtractingUniverse ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Network className="w-4 h-4 mr-2" />}
                           Extract Universe
@@ -4307,13 +4346,13 @@ export default function App() {
                       </div>
 
                       {savedCards.length > 0 && (
-                        <div className="space-y-3 pt-4 border-t border-[#e5e4e2]">
+                        <div className="space-y-3 pt-4 border-t border-border">
                           <Label className="text-slate-700 font-medium flex items-center">
                             Include Saved Cards in Lore Building
                           </Label>
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                             {savedCards.map(card => (
-                              <div key={card.id} className="flex items-center space-x-2 bg-[#f9f8f6] p-3 rounded-xl border border-[#e5e4e2]">
+                              <div key={card.id} className="flex items-center space-x-2 bg-background p-3 rounded-xl border border-border">
                                 <Checkbox 
                                   id={`universe-card-${card.id}`}
                                   checked={universeSelectedCards.has(card.id)}
@@ -4339,10 +4378,10 @@ export default function App() {
                       )}
                     </div>
 
-                    <div className="flex-1 min-h-[500px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
+                    <div className="flex-1 min-h-[500px] bg-card border border-border rounded-2xl md:rounded-3xl shadow-sm overflow-hidden relative">
                       {isExtractingUniverse ? (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-white/80 backdrop-blur-sm z-20">
-                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-[#8B3A3A] animate-spin mb-4 md:mb-6" />
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-center bg-card/80 backdrop-blur-sm z-20">
+                          <Loader2 className="w-8 h-8 md:w-12 md:h-12 text-primary animate-spin mb-4 md:mb-6" />
                           <h4 className="text-lg md:text-xl font-serif font-medium text-slate-900">Analyzing Relationships...</h4>
                           <p className="text-slate-500 mt-2 max-w-xs text-sm md:text-base">
                             Extracting characters, shared universes, and pipeline progressions.
@@ -4352,7 +4391,7 @@ export default function App() {
                         <UniverseMap data={universeData} onAddLink={handleAddUniverseLink} />
                       ) : (
                         <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6">
-                          <div className="w-16 h-16 rounded-full bg-[#f0efe9] flex items-center justify-center mb-4">
+                          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
                             <Network className="w-6 h-6 text-slate-400" />
                           </div>
                           <h4 className="text-lg font-serif font-medium text-slate-900">No Universe Data</h4>
@@ -4376,10 +4415,10 @@ export default function App() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6 md:space-y-8 h-full flex flex-col"
                 >
-                  <div className="border-b border-[#e5e4e2] pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
+                  <div className="border-b border-border pb-6 shrink-0 flex flex-col md:flex-row md:items-end justify-between gap-4">
                     <div>
-                      <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Script Forge</h2>
-                      <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                      <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Script Forge</h2>
+                      <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed mt-2">
                         Build JanitorAI scripts and lorebooks.
                       </p>
                     </div>
@@ -4387,7 +4426,7 @@ export default function App() {
                       <Button 
                         onClick={() => handleSaveDraft('app')}
                         variant="outline"
-                        className="rounded-full border-[#e5e4e2] hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
+                        className="rounded-full border-border hover:bg-slate-50 px-4 text-sm w-full sm:w-auto"
                       >
                         <Save className="w-4 h-4 mr-2" />
                         Save Draft
@@ -4405,7 +4444,7 @@ export default function App() {
                   </div>
 
                   <div className="flex-1 flex flex-col space-y-4 md:space-y-6 m-0 h-full">
-                    <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
+                    <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-4 md:space-y-6 shrink-0">
                       <div className="space-y-2">
                         <Label className="text-slate-700 font-medium">Describe the Script You Want</Label>
                         <p className="text-sm text-slate-500">
@@ -4415,21 +4454,21 @@ export default function App() {
                           value={scriptPrompt}
                           onChange={(e) => setScriptPrompt(e.target.value)}
                           placeholder="Describe your script logic here..."
-                          className="min-h-[120px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                          className="min-h-[120px] rounded-xl border-border focus-visible:ring-primary"
                         />
                       </div>
                       <Button
                         onClick={handleGenerateScript}
                         disabled={isGeneratingScript || !scriptPrompt.trim()}
-                        className="w-full md:w-auto rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white h-10 px-6 shadow-md shadow-[#8B3A3A]/20 transition-all"
+                        className="w-full md:w-auto rounded-xl bg-primary-solid hover:bg-primary-hover text-white h-10 px-6 shadow-md shadow-primary/20 transition-all"
                       >
                         {isGeneratingScript ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Wand2 className="w-4 h-4 mr-2" />}
                         Generate Script
                       </Button>
                     </div>
 
-                    <div className="flex-1 min-h-[400px] bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl shadow-sm overflow-hidden flex flex-col">
-                      <div className="p-4 border-b border-[#e5e4e2] bg-[#f9f8f6] flex justify-between items-center">
+                    <div className="flex-1 min-h-[400px] bg-card border border-border rounded-2xl md:rounded-3xl shadow-sm overflow-hidden flex flex-col">
+                      <div className="p-4 border-b border-border bg-background flex justify-between items-center">
                         <div className="flex items-center gap-4">
                           <h3 className="font-medium text-slate-700">Generated Script</h3>
                           {scriptValidationError && (
@@ -4444,7 +4483,7 @@ export default function App() {
                             size="sm"
                             onClick={() => {
                               navigator.clipboard.writeText(generatedScript);
-                              alert("Script copied to clipboard!");
+                              notify("Script copied to clipboard!");
                             }}
                             className="h-8 rounded-lg"
                           >
@@ -4482,40 +4521,46 @@ export default function App() {
                   transition={{ duration: 0.3 }}
                   className="space-y-6 md:space-y-8 max-w-3xl"
                 >
-                  <div className="border-b border-[#e5e4e2] pb-6">
-                    <h2 className="text-3xl md:text-5xl font-serif font-light tracking-tight text-slate-900">Configuration</h2>
-                    <p className="text-slate-500 text-base md:text-lg font-light mt-2">
+                  <div className="border-b border-border pb-6">
+                    <h2 className="text-[2rem] md:text-[3.25rem] md:leading-[1.05] font-serif font-light tracking-[-0.03em] text-balance text-slate-900">Configuration</h2>
+                    <p className="text-slate-500 text-base md:text-lg font-light max-w-2xl leading-relaxed mt-2">
                       Manage AI providers and API keys. Data is stored locally in your browser.
                     </p>
                   </div>
 
-                  <div className="bg-white border border-[#e5e4e2] rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-6 md:space-y-8">
+                  <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-sm space-y-6 md:space-y-8">
                     <div>
                       <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Active Synthesis Engine</h3>
                       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         {(["gemini", "anthropic", "openrouter", "openrouter-responses", "openai", "openai-responses", "custom"] as AIProvider[]).map((p) => {
-                          let label = p as string;
-                          if (p === "openai-responses") label = "OpenAI (Responses)";
-                          else if (p === "openrouter") label = "OpenRouter";
-                          else if (p === "openrouter-responses") label = "OpenRouter (Resp)";
+                          const PROVIDER_LABELS: Record<string, string> = {
+                            "gemini": "Gemini",
+                            "anthropic": "Anthropic",
+                            "openrouter": "OpenRouter",
+                            "openrouter-responses": "OpenRouter (Responses)",
+                            "openai": "OpenAI",
+                            "openai-responses": "OpenAI (Responses)",
+                            "custom": "Custom",
+                          };
+                          const label = PROVIDER_LABELS[p as string] ?? (p as string);
                           return (
                           <div
                             key={p}
                             className={cn(
-                              "flex items-center justify-center rounded-xl border-2 p-4 cursor-pointer transition-all",
-                              provider === p 
-                                ? "border-[#8B3A3A] bg-[#8B3A3A]/5 text-[#8B3A3A]" 
-                                : "border-[#e5e4e2] bg-transparent hover:bg-[#f9f8f6] text-slate-600"
+                              "flex items-center justify-center rounded-xl border p-4 min-h-[64px] cursor-pointer transition-all duration-200 select-none active:scale-[0.98]",
+                              provider === p
+                                ? "border-primary bg-primary/5 text-primary shadow-sm ring-1 ring-primary/20"
+                                : "border-border bg-transparent hover:bg-background hover:border-foreground/20 text-slate-600 hover:shadow-xs"
                             )}
                             onClick={() => setProvider(p)}
                           >
-                            <span className="font-medium capitalize tracking-wide">{label}</span>
+                            <span className="font-medium tracking-wide text-center text-sm leading-tight">{label}</span>
                           </div>
                         )})}
                       </div>
                     </div>
 
-                    <div className="pt-6 md:pt-8 border-t border-[#e5e4e2]">
+                    <div className="pt-6 md:pt-8 border-t border-border">
                       <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4 md:mb-6">API Credentials</h3>
                       <div className="space-y-4 md:space-y-6">
                         <div className="space-y-2">
@@ -4534,7 +4579,7 @@ export default function App() {
                                 id="gemini-model"
                                 value={apiModels["gemini"] || ""}
                                 onChange={(e) => setApiModels({ ...apiModels, gemini: e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                className="w-full mt-1 rounded-xl border-border focus-visible:ring-primary p-2 border bg-card text-sm"
                               >
                                 {availableModels["gemini"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
@@ -4559,7 +4604,7 @@ export default function App() {
                                 id="anthropic-model"
                                 value={apiModels["anthropic"] || ""}
                                 onChange={(e) => setApiModels({ ...apiModels, anthropic: e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                className="w-full mt-1 rounded-xl border-border focus-visible:ring-primary p-2 border bg-card text-sm"
                               >
                                 {availableModels["anthropic"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
@@ -4569,7 +4614,7 @@ export default function App() {
                           )}
                         </div>
 
-                        <div className="space-y-4 pt-6 md:pt-8 border-t border-[#e5e4e2]">
+                        <div className="space-y-4 pt-6 md:pt-8 border-t border-border">
                           <h3 className="font-serif font-medium text-xl md:text-2xl text-slate-900 mb-4">Storage Management</h3>
                           <p className="text-sm text-slate-500 mb-4">
                             All your data is currently stored in your browser's private storage (IndexedDB).
@@ -4580,7 +4625,7 @@ export default function App() {
                             <Button 
                               onClick={handleExportData}
                               variant="outline"
-                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                              className="rounded-xl border-border hover:bg-slate-50 justify-start h-auto py-4"
                             >
                               <div className="flex flex-col items-start">
                                 <span className="flex items-center font-medium text-slate-900">
@@ -4594,7 +4639,7 @@ export default function App() {
                             <Button 
                               onClick={() => importInputRef.current?.click()}
                               variant="outline"
-                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                              className="rounded-xl border-border hover:bg-slate-50 justify-start h-auto py-4"
                             >
                               <div className="flex flex-col items-start">
                                 <span className="flex items-center font-medium text-slate-900">
@@ -4615,7 +4660,7 @@ export default function App() {
                             <Button 
                               onClick={recoverLegacyData}
                               variant="outline"
-                              className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 justify-start h-auto py-4"
+                              className="rounded-xl border-border hover:bg-slate-50 justify-start h-auto py-4"
                             >
                               <div className="flex flex-col items-start">
                                 <span className="flex items-center font-medium text-slate-900">
@@ -4628,7 +4673,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="space-y-2 pt-6 md:pt-8 border-t border-[#e5e4e2]">
+                        <div className="space-y-2 pt-6 md:pt-8 border-t border-border">
                           <Label htmlFor="openai" className="text-slate-700 font-medium">OpenAI API Key (shared with Responses API)</Label>
                           <ApiKeyInput
                             id="openai"
@@ -4643,7 +4688,7 @@ export default function App() {
                                 id="openai-model"
                                 value={apiModels["openai"] || ""}
                                 onChange={(e) => setApiModels({ ...apiModels, openai: e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                className="w-full mt-1 rounded-xl border-border focus-visible:ring-primary p-2 border bg-card text-sm"
                               >
                                 {availableModels["openai"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
@@ -4658,7 +4703,7 @@ export default function App() {
                                 id="openai-responses-model"
                                 value={apiModels["openai-responses"] || ""}
                                 onChange={(e) => setApiModels({ ...apiModels, "openai-responses": e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm shadow-sm"
+                                className="w-full mt-1 rounded-xl border-border focus-visible:ring-primary p-2 border bg-card text-sm shadow-sm"
                               >
                                 {availableModels["openai-responses"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
@@ -4683,7 +4728,7 @@ export default function App() {
                                 id="openrouter-model"
                                 value={apiModels["openrouter"] || ""}
                                 onChange={(e) => setApiModels({ ...apiModels, openrouter: e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                className="w-full mt-1 rounded-xl border-border focus-visible:ring-primary p-2 border bg-card text-sm"
                               >
                                 {availableModels["openrouter"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
@@ -4698,7 +4743,7 @@ export default function App() {
                                 id="openrouter-responses-model"
                                 value={apiModels["openrouter-responses"] || ""}
                                 onChange={(e) => setApiModels({ ...apiModels, "openrouter-responses": e.target.value })}
-                                className="w-full mt-1 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm shadow-sm"
+                                className="w-full mt-1 rounded-xl border-border focus-visible:ring-primary p-2 border bg-card text-sm shadow-sm"
                               >
                                 {availableModels["openrouter-responses"].map(m => (
                                   <option key={m.id} value={m.id}>{m.name}</option>
@@ -4708,7 +4753,7 @@ export default function App() {
                           )}
                         </div>
 
-                        <div className="pt-6 mt-6 border-t border-[#e5e4e2] space-y-6">
+                        <div className="pt-6 mt-6 border-t border-border space-y-6">
                           <div className="flex items-center justify-between">
                             <h4 className="font-medium text-slate-900">Custom API Endpoints</h4>
                             <Button 
@@ -4732,7 +4777,7 @@ export default function App() {
                           </div>
                           
                           {/* Legacy Custom Endpoint */}
-                          <div className="p-4 border border-[#e5e4e2] rounded-xl space-y-4 bg-slate-50">
+                          <div className="p-4 border border-border rounded-xl space-y-4 bg-slate-50">
                             <div className="flex items-center justify-between">
                               <h5 className="text-sm font-semibold text-slate-700">Legacy Custom Endpoint</h5>
                             </div>
@@ -4743,7 +4788,7 @@ export default function App() {
                                 placeholder="https://your-api.com/v1/chat/completions"
                                 value={apiKeys.customEndpoint}
                                 onChange={(e) => setApiKeys({ ...apiKeys, customEndpoint: e.target.value })}
-                                className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                className="rounded-lg border-border focus-visible:ring-primary h-9 text-sm"
                               />
                             </div>
                             <div className="space-y-2">
@@ -4762,7 +4807,7 @@ export default function App() {
                                   id="custom-model"
                                   value={apiModels["custom"] || ""}
                                   onChange={(e) => setApiModels({ ...apiModels, custom: e.target.value })}
-                                  className="w-full mt-1 rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                  className="w-full mt-1 rounded-lg border-border focus-visible:ring-primary p-2 border bg-card text-sm"
                                 >
                                   {availableModels["custom"].map(m => (
                                     <option key={m.id} value={m.id}>{m.name}</option>
@@ -4774,7 +4819,7 @@ export default function App() {
 
                           {/* Dynamic Custom Endpoints */}
                           {apiKeys.customEndpoints?.map((ep, index) => (
-                            <div key={ep.id} className="p-4 border border-[#e5e4e2] rounded-xl space-y-4 bg-slate-50 relative">
+                            <div key={ep.id} className="p-4 border border-border rounded-xl space-y-4 bg-slate-50 relative">
                               <Button
                                 variant="ghost"
                                 size="icon"
@@ -4799,7 +4844,7 @@ export default function App() {
                                     newEndpoints[index] = { ...ep, name: e.target.value };
                                     setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
                                   }}
-                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                  className="rounded-lg border-border focus-visible:ring-primary h-9 text-sm"
                                 />
                               </div>
                               <div className="space-y-2">
@@ -4813,7 +4858,7 @@ export default function App() {
                                     newEndpoints[index] = { ...ep, url: e.target.value };
                                     setApiKeys({ ...apiKeys, customEndpoints: newEndpoints });
                                   }}
-                                  className="rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] h-9 text-sm"
+                                  className="rounded-lg border-border focus-visible:ring-primary h-9 text-sm"
                                 />
                               </div>
                               <div className="space-y-2">
@@ -4836,7 +4881,7 @@ export default function App() {
                                     id={`model-${ep.id}`}
                                     value={apiModels[ep.id] || ""}
                                     onChange={(e) => setApiModels({ ...apiModels, [ep.id]: e.target.value })}
-                                    className="w-full mt-1 rounded-lg border-[#e5e4e2] focus-visible:ring-[#8B3A3A] p-2 border bg-white text-sm"
+                                    className="w-full mt-1 rounded-lg border-border focus-visible:ring-primary p-2 border bg-card text-sm"
                                   >
                                     {availableModels[ep.id].map(m => (
                                       <option key={m.id} value={m.id}>{m.name}</option>
@@ -4863,9 +4908,9 @@ export default function App() {
                     initial={{ opacity: 0, scale: 0.95 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
-                    className="bg-white rounded-3xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-[#e5e4e2]"
+                    className="bg-card rounded-3xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-border"
                   >
-                    <div className="p-6 border-b border-[#e5e4e2] flex justify-between items-center bg-[#f9f8f6]">
+                    <div className="p-6 border-b border-border flex justify-between items-center bg-background">
                       <h3 className="text-2xl font-serif font-medium text-slate-900">
                         {editingTemplateId ? "Edit Template" : "Create New Template"}
                       </h3>
@@ -4873,7 +4918,7 @@ export default function App() {
                         variant="ghost"
                         size="icon"
                         onClick={() => setIsTemplateEditorOpen(false)}
-                        className="rounded-full hover:bg-white text-slate-500 hover:text-slate-900"
+                        className="rounded-full hover:bg-card text-slate-500 hover:text-slate-900"
                       >
                         <X className="w-5 h-5" />
                       </Button>
@@ -4886,7 +4931,7 @@ export default function App() {
                           value={editingTemplateName}
                           onChange={(e) => handleTemplateFieldChange('name', e.target.value)}
                           placeholder="e.g. My Custom RPG Template"
-                          className="h-11 rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A]"
+                          className="h-11 rounded-xl border-border focus-visible:ring-primary"
                         />
                       </div>
                       <div className="space-y-2">
@@ -4897,7 +4942,7 @@ export default function App() {
                           value={editingTemplateContent}
                           onChange={(e) => handleTemplateFieldChange('content', e.target.value)}
                           placeholder="Setting:&#10;* Full Name:&#10;* Age:&#10;..."
-                          className="min-h-[300px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] font-mono text-sm"
+                          className="min-h-[300px] rounded-xl border-border focus-visible:ring-primary font-mono text-sm"
                         />
                       </div>
                       <div className="space-y-2">
@@ -4908,15 +4953,15 @@ export default function App() {
                           value={editingTemplateExample}
                           onChange={(e) => handleTemplateFieldChange('example', e.target.value)}
                           placeholder="Setting: Modern Day&#10;* Full Name: John Doe&#10;* Age: 30&#10;..."
-                          className="min-h-[200px] rounded-xl border-[#e5e4e2] focus-visible:ring-[#8B3A3A] font-mono text-sm"
+                          className="min-h-[200px] rounded-xl border-border focus-visible:ring-primary font-mono text-sm"
                         />
                       </div>
                     </div>
-                    <div className="p-6 border-t border-[#e5e4e2] bg-[#f9f8f6] flex justify-between items-center">
+                    <div className="p-6 border-t border-border bg-background flex justify-between items-center">
                       <Button
                         variant="outline"
                         onClick={() => handleSaveDraft('template')}
-                        className="rounded-xl border-[#e5e4e2] hover:bg-slate-50 text-slate-700"
+                        className="rounded-xl border-border hover:bg-slate-50 text-slate-700"
                       >
                         <Save className="w-4 h-4 mr-2" />
                         Save Draft
@@ -4925,13 +4970,13 @@ export default function App() {
                         <Button
                           variant="outline"
                           onClick={() => setIsTemplateEditorOpen(false)}
-                          className="rounded-xl border-[#e5e4e2] hover:bg-white text-slate-700"
+                          className="rounded-xl border-border hover:bg-card text-slate-700"
                         >
                           Cancel
                         </Button>
                         <Button
                           onClick={saveTemplate}
-                          className="rounded-xl bg-[#8B3A3A] hover:bg-[#7a3333] text-white shadow-md shadow-[#8B3A3A]/20"
+                          className="rounded-xl bg-primary-solid hover:bg-primary-hover text-white shadow-md shadow-primary/20"
                         >
                           <Save className="w-4 h-4 mr-2" />
                           Save Template
@@ -4946,42 +4991,42 @@ export default function App() {
             {/* Hidden Export Container */}
             {exportingCard && (
               <div className="fixed top-0 left-0 -z-50 opacity-0 pointer-events-none">
-                <div id="export-card-container" className="bg-[#f9f8f6] p-8 rounded-3xl shadow-xl w-[800px] font-sans text-slate-900 border border-[#e5e4e2]">
-                  <div className="border-b border-[#e5e4e2] pb-6 mb-6 flex items-center gap-6">
+                <div id="export-card-container" className="bg-background p-8 rounded-3xl shadow-xl w-[800px] font-sans text-slate-900 border border-border">
+                  <div className="border-b border-border pb-6 mb-6 flex items-center gap-6">
                     {exportingCard.image && (
                       <div className="w-32 h-32 rounded-2xl overflow-hidden flex-shrink-0 border-2 border-white shadow-md">
                         <img src={exportingCard.image} alt={exportingCard.name} className="w-full h-full object-cover" />
                       </div>
                     )}
                     <div>
-                      <h1 className="text-4xl font-serif font-bold text-[#8B3A3A] mb-2">{exportingCard.name || "Unknown Character"}</h1>
+                      <h1 className="text-4xl font-serif font-bold text-primary mb-2">{exportingCard.name || "Unknown Character"}</h1>
                       {exportingCard.creator && <p className="text-sm font-medium text-slate-500 uppercase tracking-widest">By {exportingCard.creator}</p>}
                     </div>
                   </div>
                   
                   <div className="space-y-6">
                     {exportingCard.description && (
-                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
-                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Description</h3>
+                      <div className="bg-card p-6 rounded-2xl border border-border">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-border pb-2 mb-3">Description</h3>
                         <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.description}</div>
                       </div>
                     )}
                     {exportingCard.personality && (
-                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
-                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Personality</h3>
+                      <div className="bg-card p-6 rounded-2xl border border-border">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-border pb-2 mb-3">Personality</h3>
                         <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.personality}</div>
                       </div>
                     )}
                     {exportingCard.scenario && (
-                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
-                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">Scenario</h3>
+                      <div className="bg-card p-6 rounded-2xl border border-border">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-border pb-2 mb-3">Scenario</h3>
                         <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed">{exportingCard.scenario}</div>
                       </div>
                     )}
                     {exportingCard.first_mes && (
-                      <div className="bg-white p-6 rounded-2xl border border-[#e5e4e2]">
-                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-[#e5e4e2] pb-2 mb-3">First Message</h3>
-                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-4 rounded-xl border border-[#e5e4e2]">{exportingCard.first_mes}</div>
+                      <div className="bg-card p-6 rounded-2xl border border-border">
+                        <h3 className="text-lg font-serif font-bold text-slate-800 border-b border-border pb-2 mb-3">First Message</h3>
+                        <div className="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed italic bg-slate-50 p-4 rounded-xl border border-border">{exportingCard.first_mes}</div>
                       </div>
                     )}
                   </div>
@@ -4992,8 +5037,10 @@ export default function App() {
         </ScrollArea>
       </div>
 
+      <ToastViewport toasts={toasts} onDismiss={dismiss} />
+
       {/* Mobile Bottom Nav */}
-      <div className="md:hidden flex-none border-t border-[#e5e4e2] bg-[#f9f8f6]/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)] z-30 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
+      <div className="md:hidden flex-none border-t border-border bg-background/95 backdrop-blur-md pb-[env(safe-area-inset-bottom)] z-30 shadow-[0_-2px_10px_rgba(0,0,0,0.02)]">
         <nav className="flex overflow-x-auto px-4 py-2 space-x-1.5 no-scrollbar snap-x snap-mandatory">
           <NavButton view="upload" icon={Upload} label="Ingestion" currentView={view} setView={setView} />
           <NavButton view="fanfiction" icon={Feather} label="Fanfiction" currentView={view} setView={setView} />

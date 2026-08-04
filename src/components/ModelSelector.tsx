@@ -99,7 +99,7 @@ export function ModelSelector({
         <select
           value={currentProvider}
           onChange={(e) => handleProviderChange(e.target.value as AIProvider)}
-          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all w-full sm:w-auto"
+          className="h-9 rounded-md border-border focus-visible:ring-primary px-2 border bg-card text-sm transition-all w-full sm:w-auto"
         >
           {providersToShow.map(p => (
             <option key={p.id} value={p.id}>{p.name}</option>
@@ -112,7 +112,7 @@ export function ModelSelector({
           value={currentModel}
           onChange={(e) => handleModelChange(e.target.value)}
           disabled={isFetchingModels[currentProvider] || modelsToShow.length === 0}
-          className="h-9 rounded-md border-[#e5e4e2] focus-visible:ring-[#8B3A3A] px-2 border bg-white text-sm transition-all disabled:opacity-50 w-full sm:max-w-[200px] truncate"
+          className="h-9 rounded-md border-border focus-visible:ring-primary px-2 border bg-card text-sm transition-all disabled:opacity-50 w-full sm:max-w-[200px] truncate"
         >
           {isFetchingModels[currentProvider] ? (
             <option value="">Loading models...</option>

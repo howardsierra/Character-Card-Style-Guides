@@ -173,7 +173,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
       .attr("fill", d => getColor(d.group))
       .attr("stroke", "#fff")
       .attr("stroke-width", 2)
-      .attr("class", "cursor-pointer transition-all hover:stroke-[#8B3A3A] hover:stroke-4");
+      .attr("class", "cursor-pointer transition-all hover:stroke-primary hover:stroke-4");
 
     node.append("text")
       .attr("dy", 35)
@@ -249,7 +249,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
 
   return (
     <div className="relative w-full h-full flex flex-col md:flex-row" ref={containerRef}>
-      <svg ref={svgRef} className="w-full h-full min-h-[400px] bg-slate-50 rounded-2xl border border-[#e5e4e2]" />
+      <svg ref={svgRef} className="w-full h-full min-h-[400px] bg-slate-50 rounded-2xl border border-border" />
       
       {tooltip && tooltip.show && (
         <div 
@@ -267,11 +267,11 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
       )}
 
       {selectedNode && (
-        <div className="absolute top-4 right-4 w-80 bg-white/90 backdrop-blur-sm p-4 rounded-xl shadow-lg border border-[#e5e4e2] z-10 max-h-[80vh] overflow-y-auto">
+        <div className="absolute top-4 right-4 w-80 bg-card/90 backdrop-blur-sm p-4 rounded-xl shadow-lg border border-border z-10 max-h-[80vh] overflow-y-auto">
           <div className="flex justify-between items-start">
             <div>
               <h3 className="font-serif font-medium text-lg text-slate-900">{selectedNode.name}</h3>
-              <p className="text-xs font-medium text-[#8B3A3A] uppercase tracking-wider mt-1">{selectedNode.group}</p>
+              <p className="text-xs font-medium text-primary uppercase tracking-wider mt-1">{selectedNode.group}</p>
             </div>
             <button 
               onClick={(e) => { e.stopPropagation(); setSelectedNode(null); setIsAddingLink(false); }}
@@ -286,7 +286,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
           )}
 
           {isAddingLink ? (
-            <div className="mt-5 space-y-4 border-t border-[#e5e4e2] pt-4">
+            <div className="mt-5 space-y-4 border-t border-border pt-4">
               <h4 className="text-sm font-bold text-slate-800">Add New Link</h4>
               
               <div className="space-y-2">
@@ -294,7 +294,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
                 <select 
                   value={newLinkTarget}
                   onChange={(e) => setNewLinkTarget(e.target.value)}
-                  className="w-full h-9 rounded-md border border-[#e5e4e2] bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                  className="w-full h-9 rounded-md border border-border bg-card px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <option value="" disabled>Select a character...</option>
                   {data.nodes.filter(n => n.id !== selectedNode.id).map(n => (
@@ -308,7 +308,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
                 <select 
                   value={newLinkType}
                   onChange={(e) => setNewLinkType(e.target.value as any)}
-                  className="w-full h-9 rounded-md border border-[#e5e4e2] bg-white px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8B3A3A]"
+                  className="w-full h-9 rounded-md border border-border bg-card px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 >
                   <option value="relationship">Relationship</option>
                   <option value="pipeline">Pipeline</option>
@@ -338,7 +338,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
                 </Button>
                 <Button 
                   size="sm" 
-                  className="flex-1 h-8 text-xs bg-[#8B3A3A] hover:bg-[#7a3333] text-white"
+                  className="flex-1 h-8 text-xs bg-primary-solid hover:bg-primary-hover text-white"
                   onClick={handleSaveLink}
                   disabled={!newLinkTarget}
                 >
@@ -368,7 +368,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
                   <div className="mt-5 space-y-5">
                     {pipelinesIn.length > 0 && (
                       <div>
-                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-[#e5e4e2] pb-1">Originated From</h4>
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-border pb-1">Originated From</h4>
                         <ul className="space-y-2">
                           {pipelinesIn.map((l, i) => {
                             const sourceId = typeof l.source === 'object' ? (l.source as any).id : l.source;
@@ -385,7 +385,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
 
                     {pipelinesOut.length > 0 && (
                       <div>
-                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-[#e5e4e2] pb-1">Pipeline To</h4>
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-border pb-1">Pipeline To</h4>
                         <ul className="space-y-2">
                           {pipelinesOut.map((l, i) => {
                             const targetId = typeof l.target === 'object' ? (l.target as any).id : l.target;
@@ -402,7 +402,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
 
                     {relationships.length > 0 && (
                       <div>
-                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-[#e5e4e2] pb-1">Relationships</h4>
+                        <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider mb-2 border-b border-border pb-1">Relationships</h4>
                         <ul className="space-y-2">
                           {relationships.map((l, i) => {
                             const sourceId = typeof l.source === 'object' ? (l.source as any).id : l.source;
@@ -424,7 +424,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          className="w-full h-8 text-xs border-dashed border-slate-300 text-slate-600 hover:text-[#8B3A3A] hover:border-[#8B3A3A] hover:bg-[#8B3A3A]/5"
+                          className="w-full h-8 text-xs border-dashed border-slate-300 text-slate-600 hover:text-primary hover:border-primary hover:bg-primary/5"
                           onClick={() => setIsAddingLink(true)}
                         >
                           + Add Link
@@ -440,11 +440,11 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
       )}
 
       {/* Legend */}
-      <div className="absolute bottom-4 left-4 bg-white/90 backdrop-blur-sm p-3 rounded-xl shadow-sm border border-[#e5e4e2] z-10 text-xs flex gap-6">
+      <div className="absolute bottom-4 left-4 bg-card/90 backdrop-blur-sm p-3 rounded-xl shadow-sm border border-border z-10 text-xs flex gap-6">
         <div>
           <div className="font-bold text-slate-800 mb-2 uppercase tracking-wider text-[10px]">Links</div>
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-4 h-0.5 bg-[#8B3A3A]"></div>
+            <div className="w-4 h-0.5 bg-primary-solid"></div>
             <span className="text-slate-600">Pipeline Progression</span>
           </div>
           <div className="flex items-center gap-2">
@@ -456,7 +456,7 @@ export default function UniverseMap({ data, onAddLink }: UniverseMapProps) {
           <div className="font-bold text-slate-800 mb-2 uppercase tracking-wider text-[10px]">Entities</div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-2">
             <div className="flex items-center gap-2">
-              <div className="w-3 h-3 rounded-full bg-[#8B3A3A]"></div>
+              <div className="w-3 h-3 rounded-full bg-primary-solid"></div>
               <span className="text-slate-600">Character</span>
             </div>
             <div className="flex items-center gap-2">
