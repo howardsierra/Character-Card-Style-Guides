@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Scratch working files. A previous set of these was committed and lingered:
+# a duplicate checkout under tmp_repo/, one-off scripts, and their .txt output.
+tmp_repo/
+tmp*.txt
+temp_*
+scratch/
