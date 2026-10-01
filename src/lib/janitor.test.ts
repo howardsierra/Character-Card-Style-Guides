@@ -107,6 +107,19 @@ describe('lintCard', () => {
     expect(ids(card({ scenario: '[Insert setting here]' }))).toContain('placeholder-scenario');
   });
 
+  it('warns when a coded bio still has template slots in it', () => {
+    const found = lintCard(card({ creator_notes: '<h1>Zane</h1><p>{{tagline}}</p><p>[Insert backstory]</p>' }), 0);
+    const bio = found.filter((i) => i.field === 'bio');
+    // One combined warning, not a second generic placeholder warning on top.
+    expect(bio.map((i) => i.id)).toEqual(['bio-unfilled']);
+    expect(bio[0].message).toContain('2 unfilled slots');
+  });
+
+  it('catches filler text left in a bio built from a sample-text template', () => {
+    expect(ids(card({ creator_notes: '<p>Zane Carter</p><p>Lorem ipsum es un texto de relleno.</p>' }))).toContain('bio-filler');
+    expect(ids(card({ creator_notes: '<p>Zane Carter</p><p>A grumpy foreman.</p>' }))).not.toContain('bio-filler');
+  });
+
   it('asks for {{char}}: lines in example dialogs', () => {
     expect(ids(card({ mes_example: 'He grunts a lot.' }))).toContain('examples-format');
   });

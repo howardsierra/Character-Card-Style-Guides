@@ -1,3 +1,4 @@
+import { FILLER_TEXT, unfilledBioSlots } from './bioTemplate';
 import type { CharacterCard } from './parser';
 
 /**
@@ -160,6 +161,25 @@ export function lintCard(card: CharacterCard, permanentBudget: number): CardIssu
   }
   if (!get('bio')) {
     issues.push({ id: 'bio-missing', severity: 'tip', field: 'bio', message: 'No public bio yet. It is what browsers read before starting a chat.' });
+  } else {
+    const gaps = unfilledBioSlots(get('bio'));
+    if (gaps.length) {
+      const shown = gaps.slice(0, 3).map((g) => g.token).join(', ');
+      issues.push({
+        id: 'bio-unfilled',
+        severity: 'warning',
+        field: 'bio',
+        message: `The bio still has ${gaps.length} unfilled slot${gaps.length > 1 ? 's' : ''}: ${shown}${gaps.length > 3 ? ', …' : ''}.`,
+      });
+    } else if (FILLER_TEXT.test(get('bio'))) {
+      // Sample-text templates have no markers, so look for the filler itself.
+      issues.push({
+        id: 'bio-filler',
+        severity: 'warning',
+        field: 'bio',
+        message: 'The bio still contains template filler text (lorem ipsum or "goes here").',
+      });
+    }
   }
 
   const examples = get('exampleDialogs');
@@ -189,7 +209,8 @@ export function lintCard(card: CharacterCard, permanentBudget: number): CardIssu
         message: `${f.label} uses ${[...new Set(miscased)].join(', ')}. Lowercase {{user}} / {{char}} is the safe form.`,
       });
     }
-    if (PLACEHOLDER.test(f.value)) {
+    // The bio has its own template-aware check above, which also knows {{slot}} syntax.
+    if (f.key !== 'bio' && PLACEHOLDER.test(f.value)) {
       issues.push({
         id: `placeholder-${f.key}`,
         severity: 'warning',

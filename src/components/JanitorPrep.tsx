@@ -11,6 +11,8 @@ import {
   toJanitorFields,
 } from '../lib/janitor';
 import { cn } from '../lib/utils';
+import type { BioSlotRequest } from '../lib/api';
+import { BioTemplateFiller } from './BioTemplateFiller';
 import { Textarea } from './ui/textarea';
 
 const BUDGET_KEY = 'st_janitor_token_budget';
@@ -53,9 +55,11 @@ interface Props {
   notify: (message: string, variant?: 'error' | 'success' | 'info') => void;
   /** The Forge's own token limit, used as the starting target when set. */
   suggestedBudget?: number;
+  /** Writes coded-bio slots with the Forge's AI. Omit to hide the template filler. */
+  onFillBioSlots?: (slots: BioSlotRequest[]) => Promise<string[]>;
 }
 
-export function JanitorPrep({ card, onChange, notify, suggestedBudget }: Props) {
+export function JanitorPrep({ card, onChange, notify, suggestedBudget, onFillBioSlots }: Props) {
   const [budget, setBudget] = useState(() => readBudget(suggestedBudget || DEFAULT_BUDGET));
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState('');
@@ -205,6 +209,16 @@ export function JanitorPrep({ card, onChange, notify, suggestedBudget }: Props) 
         </ul>
       </section>
 
+      {onFillBioSlots && (
+        <BioTemplateFiller
+          cardName={card.name}
+          currentBio={card.creator_notes || ''}
+          onFill={onFillBioSlots}
+          onApply={(html) => onChange({ ...card, creator_notes: html })}
+          notify={notify}
+        />
+      )}
+
       {/* Copy-out */}
       <section className="rounded-2xl border border-border bg-card p-5 md:p-6 shadow-sm">
         <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
@@ -254,8 +268,9 @@ export function JanitorPrep({ card, onChange, notify, suggestedBudget }: Props) 
                 <Textarea
                   value={card.creator_notes || ''}
                   onChange={(e) => onChange({ ...card, creator_notes: e.target.value })}
+                  spellCheck={!(card.creator_notes || '').trimStart().startsWith('<')}
                   placeholder="What a browser sees before starting a chat: the hook, the setting, any content notes."
-                  className="min-h-[90px] bg-card text-sm"
+                  className={cn('min-h-[90px] bg-card text-sm', (card.creator_notes || '').trimStart().startsWith('<') && 'font-mono text-xs')}
                 />
               ) : f.value ? (
                 <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words font-sans text-sm leading-relaxed text-slate-700">

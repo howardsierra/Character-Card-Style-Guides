@@ -3964,6 +3964,13 @@ export default function App() {
                             onChange={setForgedCard}
                             notify={notify}
                             suggestedBudget={forgeTokenLimit || undefined}
+                            onFillBioSlots={async (slots) => {
+                              const { fillBioSlots } = await import("./lib/api");
+                              const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+                              // Same voice as the card itself, when a guide is selected.
+                              const guide = guides.find((g) => g.id === forgeSelectedGuide);
+                              return fillBioSlots(currentProvider, apiKeys, forgedCard, slots, currentModel, guide?.content);
+                            }}
                           />
                         ) : (
                           <div className="rounded-2xl md:rounded-3xl border border-dashed border-border bg-card px-6 py-16 text-center">
