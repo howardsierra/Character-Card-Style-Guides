@@ -11,8 +11,9 @@ import {
   toJanitorFields,
 } from '../lib/janitor';
 import { cn } from '../lib/utils';
-import type { BioSlotRequest } from '../lib/api';
+import type { BioSlotRequest, TagSuggestions } from '../lib/api';
 import { BioTemplateFiller } from './BioTemplateFiller';
+import { JanitorTagPicker } from './JanitorTagPicker';
 import { Textarea } from './ui/textarea';
 
 const BUDGET_KEY = 'st_janitor_token_budget';
@@ -57,12 +58,13 @@ interface Props {
   suggestedBudget?: number;
   /** Writes coded-bio slots with the Forge's AI. Omit to hide the template filler. */
   onFillBioSlots?: (slots: BioSlotRequest[]) => Promise<string[]>;
+  /** Recommends JanitorAI tags with the Forge's AI. Omit to hide suggestions. */
+  onSuggestTags?: () => Promise<TagSuggestions>;
 }
 
-export function JanitorPrep({ card, onChange, notify, suggestedBudget, onFillBioSlots }: Props) {
+export function JanitorPrep({ card, onChange, notify, suggestedBudget, onFillBioSlots, onSuggestTags }: Props) {
   const [budget, setBudget] = useState(() => readBudget(suggestedBudget || DEFAULT_BUDGET));
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [tagDraft, setTagDraft] = useState('');
 
   const fields = useMemo(() => toJanitorFields(card), [card]);
   const tokens = useMemo(() => janitorTokenBreakdown(card), [card]);
@@ -105,15 +107,6 @@ export function JanitorPrep({ card, onChange, notify, suggestedBudget, onFillBio
     setTimeout(() => el?.classList.remove('ring-2', 'ring-primary/40'), 1400);
   };
 
-  const addTags = (raw: string) => {
-    const incoming = raw.split(',').map((t) => t.trim()).filter(Boolean);
-    const merged = [...tags];
-    for (const t of incoming) {
-      if (!merged.some((m) => m.toLowerCase() === t.toLowerCase())) merged.push(t);
-    }
-    if (merged.length !== tags.length) onChange({ ...card, tags: merged });
-    setTagDraft('');
-  };
 
   return (
     <div className="space-y-6">
@@ -282,49 +275,12 @@ export function JanitorPrep({ card, onChange, notify, suggestedBudget, onFillBio
             </div>
           ))}
 
-          {/* Tags */}
-          <div id="janitor-field-tags" className="rounded-xl border border-border bg-background p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-semibold text-slate-900">Tags</span>
-              <button
-                onClick={() => copy('tags', tags.join(', '), 'tags')}
-                disabled={!tags.length}
-                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:bg-muted hover:text-primary disabled:pointer-events-none disabled:opacity-40"
-              >
-                {copiedKey === 'tags' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-                {copiedKey === 'tags' ? 'Copied' : 'Copy'}
-              </button>
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {tags.map((t) => (
-                <span key={t} className="inline-flex items-center gap-1 rounded-full border border-border bg-card py-0.5 pl-2.5 pr-1 text-xs text-slate-700">
-                  {t}
-                  <button
-                    onClick={() => onChange({ ...card, tags: tags.filter((x) => x !== t) })}
-                    aria-label={`Remove tag ${t}`}
-                    className="rounded-full p-0.5 text-slate-400 hover:bg-muted hover:text-destructive"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-              <input
-                value={tagDraft}
-                onChange={(e) => setTagDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ',') {
-                    e.preventDefault();
-                    addTags(tagDraft);
-                  } else if (e.key === 'Backspace' && !tagDraft && tags.length) {
-                    onChange({ ...card, tags: tags.slice(0, -1) });
-                  }
-                }}
-                onBlur={() => tagDraft.trim() && addTags(tagDraft)}
-                placeholder={tags.length ? 'Add another…' : 'Male, Slow Burn, Fantasy…'}
-                className="min-w-[10rem] flex-1 bg-transparent py-1 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none"
-              />
-            </div>
-          </div>
+          <JanitorTagPicker
+            tags={tags}
+            onChange={(next) => onChange({ ...card, tags: next })}
+            onSuggest={onSuggestTags}
+            notify={notify}
+          />
         </div>
       </section>
     </div>

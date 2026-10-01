@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { jsonrepair } from "jsonrepair";
 import { CharacterCard } from "./parser";
+import { PRESET_TAGS, findPreset, normalizeTag } from "./janitorTags";
 
 export type AIProvider = "gemini" | "anthropic" | "openrouter" | "openai" | "openai-responses" | "custom" | string;
 
@@ -1472,6 +1473,111 @@ RULES:
   const ids = slots.map((_, i) => `s${i + 1}`);
   const parsed = parseJsonObject(responseText, 'Failed to fill the bio template', ids);
   return ids.map((id) => (typeof parsed[id] === 'string' ? parsed[id].trim() : ''));
+}
+
+export interface TagSuggestion {
+  tag: string;
+  reason: string;
+  /** A JanitorAI preset tag, rather than a custom one. */
+  preset: boolean;
+}
+
+export interface TagSuggestions {
+  /** The required rating tag, or null if the model did not give a usable one. */
+  rating: { tag: 'Limited' | 'Limitless'; reason: string } | null;
+  /** Ranked best first. More than fit in the 10-tag limit, so the user chooses. */
+  tags: TagSuggestion[];
+}
+
+/**
+ * Recommend JanitorAI tags for a card.
+ *
+ * The model chooses presets only from JanitorAI's own list, and nothing it
+ * returns is trusted as-is: a "preset" that is not one becomes a custom tag,
+ * custom tags are coerced into JanitorAI's 3-21 letters-or-numbers format or
+ * dropped, and duplicates (including case and spacing variants) collapse.
+ */
+export async function suggestJanitorTags(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: CharacterCard,
+  model?: string
+): Promise<TagSuggestions> {
+  const presetList = PRESET_TAGS.filter((t) => t.group !== 'Rating')
+    .map((t) => `- ${t.name} (${t.group}): ${t.description}`)
+    .join('\n');
+
+  const cardText = [
+    `Name: ${card.name || ''}`,
+    card.description && `Description: ${card.description}`,
+    card.personality && `Personality: ${card.personality}`,
+    card.scenario && `Scenario: ${card.scenario}`,
+    card.first_mes && `Initial message: ${card.first_mes.slice(0, 1500)}`,
+    card.creator_notes && `Public bio: ${card.creator_notes.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').slice(0, 1500)}`,
+    card.tags?.length && `Tags it already has: ${card.tags.join(', ')}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const prompt = `Recommend JanitorAI tags for this character card. Tags are how people find bots, so choose what a reader searching for this bot would look for.
+
+CHARACTER CARD:
+${cardText}
+
+RATING (exactly one is required):
+- Limited: platonic content exclusively (family, friends, pets, etc.)
+- Limitless: sexual or romantic content (romantic or sexual partners, NSFW plots, etc.)
+
+PRESET TAGS (use these exact names; do not invent presets):
+${presetList}
+
+RULES:
+- Recommend up to 7 preset tags that genuinely fit, best first. Gender tags describe the character; POV tags describe who {{user}} is written as in the initial message (they/them or macros = AnyPOV).
+- Only use Dominant, Submissive or Switch when the card is explicitly about that dynamic.
+- Then recommend up to 4 custom tags for genre, trope or setting the presets miss (e.g. SlowBurn, EnemiesToLovers, Mafia). Custom tags must be 3-21 letters or numbers, no spaces or punctuation.
+- Give each tag a short reason (under 12 words) tied to something in the card.
+
+Respond with ONLY a JSON object:
+{"rating": "Limited" or "Limitless", "rating_reason": "...", "presets": [{"tag": "...", "reason": "..."}], "custom": [{"tag": "...", "reason": "..."}]}`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    'You tag roleplay bots for discovery. Output only valid JSON.',
+    true,
+    2000,
+    model
+  );
+
+  const parsed = parseJsonObject(responseText, 'Failed to suggest tags', ['rating', 'presets', 'custom']);
+
+  const ratingPreset = typeof parsed.rating === 'string' ? findPreset(parsed.rating) : undefined;
+  const rating =
+    ratingPreset?.group === 'Rating'
+      ? { tag: ratingPreset.name as 'Limited' | 'Limitless', reason: String(parsed.rating_reason || '').trim() }
+      : null;
+
+  const seen = new Set<string>();
+  const tags: TagSuggestion[] = [];
+  const take = (list: unknown) => {
+    if (!Array.isArray(list)) return;
+    for (const entry of list) {
+      const raw = typeof entry === 'string' ? entry : entry?.tag;
+      if (typeof raw !== 'string') continue;
+      const tag = normalizeTag(raw);
+      if (!tag) continue;
+      const preset = findPreset(tag);
+      // The rating is handled on its own; anything else listed twice keeps its first rank.
+      if (preset?.group === 'Rating' || seen.has(tag.toLowerCase())) continue;
+      seen.add(tag.toLowerCase());
+      tags.push({ tag, preset: !!preset, reason: typeof entry?.reason === 'string' ? entry.reason.trim() : '' });
+    }
+  };
+  take(parsed.presets);
+  take(parsed.custom);
+
+  return { rating, tags };
 }
 
 export async function suggestArchetype(

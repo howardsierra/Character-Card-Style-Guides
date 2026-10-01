@@ -1,4 +1,5 @@
 import { FILLER_TEXT, unfilledBioSlots } from './bioTemplate';
+import { validateJanitorTags } from './janitorTags';
 import type { CharacterCard } from './parser';
 
 /**
@@ -107,7 +108,7 @@ export type IssueSeverity = 'error' | 'warning' | 'tip';
 export interface CardIssue {
   id: string;
   severity: IssueSeverity;
-  field: JanitorField['key'] | 'card';
+  field: JanitorField['key'] | 'tags' | 'card';
   message: string;
 }
 
@@ -244,6 +245,10 @@ export function lintCard(card: CharacterCard, permanentBudget: number): CardIssu
       issues.push({ id: 'opener-short', severity: 'tip', field: 'initialMessage', message: `The initial message is ${words} words. Bots mirror the opener's length, so short openers get short replies.` });
     }
   }
+
+  validateJanitorTags(card.tags || []).forEach((problem, i) =>
+    issues.push({ id: `tags-${i}`, severity: problem.severity, field: 'tags', message: problem.message })
+  );
 
   const { permanent } = janitorTokenBreakdown(card);
   if (permanentBudget > 0 && permanent > permanentBudget) {

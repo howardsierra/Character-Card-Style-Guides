@@ -16,6 +16,7 @@ function card(overrides: Partial<CharacterCard> = {}): CharacterCard {
     first_mes: OPENER,
     mes_example: '<START>\n{{user}}: Hi.\n{{char}}: Door sticks. Shove it.',
     creator_notes: 'A grumpy foreman with a soft spot.',
+    tags: ['Limited', 'Male'],
     ...overrides,
   };
 }
@@ -118,6 +119,12 @@ describe('lintCard', () => {
   it('catches filler text left in a bio built from a sample-text template', () => {
     expect(ids(card({ creator_notes: '<p>Zane Carter</p><p>Lorem ipsum es un texto de relleno.</p>' }))).toContain('bio-filler');
     expect(ids(card({ creator_notes: '<p>Zane Carter</p><p>A grumpy foreman.</p>' }))).not.toContain('bio-filler');
+  });
+
+  it('brings JanitorAI tag rules into the checks', () => {
+    const tagIssues = lintCard(card({ tags: ['Male', 'slow burn'] }), 0).filter((i) => i.field === 'tags');
+    expect(tagIssues.map((i) => i.severity)).toEqual(['error', 'error']);
+    expect(tagIssues.map((i) => i.message).join(' ')).toMatch(/rating tag.*slow burn/s);
   });
 
   it('asks for {{char}}: lines in example dialogs', () => {

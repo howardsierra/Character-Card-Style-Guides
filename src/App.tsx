@@ -3971,6 +3971,11 @@ export default function App() {
                               const guide = guides.find((g) => g.id === forgeSelectedGuide);
                               return fillBioSlots(currentProvider, apiKeys, forgedCard, slots, currentModel, guide?.content);
                             }}
+                            onSuggestTags={async () => {
+                              const { suggestJanitorTags } = await import("./lib/api");
+                              const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+                              return suggestJanitorTags(currentProvider, apiKeys, forgedCard, currentModel);
+                            }}
                           />
                         ) : (
                           <div className="rounded-2xl md:rounded-3xl border border-dashed border-border bg-card px-6 py-16 text-center">
