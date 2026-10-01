@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw, Eye, EyeOff, ClipboardPaste, LogIn, LogOut, Feather } from "lucide-react";
+import { Upload, Settings, FileText, Download, Merge, Trash2, Plus, Check, Loader2, BookOpen, Wand2, Info, Pencil, History, Save, X, Network, FileJson, Image as ImageIcon, Undo2, Redo2, Moon, Sun, Copy, Music, Dices, RefreshCw, Eye, EyeOff, ClipboardPaste, LogIn, LogOut, Feather, ClipboardList } from "lucide-react";
 import { Button } from "./components/ui/button";
 import { Input } from "./components/ui/input";
 import { Label } from "./components/ui/label";
@@ -26,6 +26,7 @@ import localforage from "localforage";
 import { handleFirestoreError, OperationType } from "./lib/firebase";
 import { fetchCollection, writeDoc, removeDoc, signInWithGoogle, signOutOfFirebase } from "./lib/firebaseSync";
 import { useFirebaseAuth } from "./hooks/useFirebaseAuth";
+import { JanitorPrep } from "./components/JanitorPrep";
 
 function ConfiguredModelSelector(props: Omit<React.ComponentProps<typeof ModelSelector>, 'customEndpoints'> & { apiKeys: ApiKeys }) {
   return <ModelSelector {...props} customEndpoints={props.apiKeys.customEndpoints} />;
@@ -185,6 +186,26 @@ function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: strin
   );
 }
 
+function readStoredString(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a stored JSON setting, falling back on absence, corruption or blocked storage. */
+function readStoredJSON<T>(key: string, fallback: T): T {
+  const raw = readStoredString(key);
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function App() {
   const [user, loadingAuth, ensureAuth] = useFirebaseAuth();
   const { toasts, notify, dismiss } = useToasts();
@@ -224,8 +245,14 @@ export default function App() {
   const [combinationSuggestion, setCombinationSuggestion] = useState<StyleCombinationSuggestion | null>(null);
   const [isSuggestingCombination, setIsSuggestingCombination] = useState(false);
   
-  const [provider, setProvider] = useState<AIProvider>("gemini");
-  const [apiKeys, setApiKeys] = useState<ApiKeys>({
+  // Settings are read synchronously at construction. Restoring them in a mount
+  // effect instead let the save effects below run first with the defaults and
+  // overwrite storage -- and under StrictMode's double-run that wiped saved API
+  // keys and the chosen provider on every dev reload.
+  const [provider, setProvider] = useState<AIProvider>(
+    () => readStoredString("st_style_provider") || "gemini"
+  );
+  const [apiKeys, setApiKeys] = useState<ApiKeys>(() => ({
     gemini: "",
     anthropic: "",
     openrouter: "",
@@ -233,10 +260,13 @@ export default function App() {
     customEndpoint: "",
     customKey: "",
     customEndpoints: [],
-  });
+    ...readStoredJSON<Partial<ApiKeys>>("st_style_keys", {}),
+  }));
 
-  const [apiModels, setApiModels] = useState<Record<string, string>>({});
-  const [sectionConfigs, setSectionConfigs] = useState<Record<string, { provider: AIProvider; model: string }>>({});
+  const [apiModels, setApiModels] = useState<Record<string, string>>(() => readStoredJSON("st_style_models", {}));
+  const [sectionConfigs, setSectionConfigs] = useState<Record<string, { provider: AIProvider; model: string }>>(
+    () => readStoredJSON("st_section_configs", {})
+  );
   const [availableModels, setAvailableModels] = useState<Record<string, AIModel[]>>({});
   const [isFetchingModels, setIsFetchingModels] = useState<Record<string, boolean>>({});
 
@@ -461,18 +491,6 @@ export default function App() {
 
   // Load saved data
   useEffect(() => {
-    const savedKeys = localStorage.getItem("st_style_keys");
-    if (savedKeys) setApiKeys(JSON.parse(savedKeys));
-
-    const savedModels = localStorage.getItem("st_style_models");
-    if (savedModels) setApiModels(JSON.parse(savedModels));
-
-    const savedSectionConfigs = localStorage.getItem("st_section_configs");
-    if (savedSectionConfigs) setSectionConfigs(JSON.parse(savedSectionConfigs));
-
-    const savedProvider = localStorage.getItem("st_style_provider");
-    if (savedProvider) setProvider(savedProvider as AIProvider);
-
     localforage.getItem("st_forge_draft").catch(e => {
       console.error("Failed to load forge draft", e);
       return null;
@@ -3203,12 +3221,13 @@ export default function App() {
                     </div>
                   ) : (
                     <Tabs value={forgeActiveTab} onValueChange={setForgeActiveTab} className="w-full">
-                      <TabsList className="flex flex-col sm:grid w-full sm:grid-cols-5 mb-6 h-auto sm:h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 gap-1 sm:gap-0">
+                      <TabsList className="grid w-full grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 mb-6 h-auto lg:h-12 bg-slate-100/50 p-1 rounded-xl border border-slate-200/60 gap-1 sm:gap-0">
                         <TabsTrigger value="details" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Character Details</TabsTrigger>
                         <TabsTrigger value="vibe" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Vibe Forge</TabsTrigger>
                         <TabsTrigger value="greeting-studio" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Greeting Studio</TabsTrigger>
                         <TabsTrigger value="adapt" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Adapt Card</TabsTrigger>
                         <TabsTrigger value="preview" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">Output Preview</TabsTrigger>
+                        <TabsTrigger value="janitor" className="rounded-lg data-[state=active]:bg-surface-raised data-[state=active]:text-primary data-[state=active]:shadow-sm font-medium transition-all py-2 sm:py-1">JanitorAI Prep</TabsTrigger>
                       </TabsList>
 
                       <TabsContent value="vibe" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
@@ -3938,6 +3957,35 @@ export default function App() {
                       </TabsContent>
 
                       {/* Output Preview */}
+                      <TabsContent value="janitor" className="mt-0 focus-visible:outline-none focus-visible:ring-0">
+                        {forgedCard ? (
+                          <JanitorPrep
+                            card={forgedCard}
+                            onChange={setForgedCard}
+                            notify={notify}
+                            suggestedBudget={forgeTokenLimit || undefined}
+                            onFillBioSlots={async (slots) => {
+                              const { fillBioSlots } = await import("./lib/api");
+                              const { currentProvider, currentModel } = getProviderAndModel("forge_generate");
+                              // Same voice as the card itself, when a guide is selected.
+                              const guide = guides.find((g) => g.id === forgeSelectedGuide);
+                              return fillBioSlots(currentProvider, apiKeys, forgedCard, slots, currentModel, guide?.content);
+                            }}
+                          />
+                        ) : (
+                          <div className="rounded-2xl md:rounded-3xl border border-dashed border-border bg-card px-6 py-16 text-center">
+                            <ClipboardList className="mx-auto mb-4 h-10 w-10 text-slate-300" />
+                            <h3 className="mb-2 font-serif text-xl text-slate-900">Nothing to prep yet</h3>
+                            <p className="mx-auto mb-6 max-w-sm text-sm text-slate-500">
+                              Forge a card, or load one from Saved Cards, to check its token budget and copy it field by field into JanitorAI.
+                            </p>
+                            <Button variant="outline" onClick={() => setForgeActiveTab("details")} className="rounded-full">
+                              Go to Character Details
+                            </Button>
+                          </div>
+                        )}
+                      </TabsContent>
+
                       <TabsContent value="preview" className="mt-0 focus-visible:outline-none focus-visible:ring-0 h-full">
                         <div className="bg-card border border-border rounded-2xl md:rounded-3xl p-6 md:p-8 shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col h-full relative overflow-hidden">
                       <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-slate-200 via-slate-300 to-slate-200"></div>

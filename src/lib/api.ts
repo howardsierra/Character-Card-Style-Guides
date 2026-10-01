@@ -1389,6 +1389,91 @@ ${slotsPrompt}`;
   }
 }
 
+export interface BioSlotRequest {
+  label: string;
+  /** Visible text around the slot, with "___" marking where it sits. */
+  context: string;
+  /** Filler currently in the slot, for sample-text templates. Sets length and format. */
+  current?: string;
+  /** Slots sharing a group sit in one paragraph and should read as one passage. */
+  group?: number;
+}
+
+/**
+ * Write the text slots of a coded-bio template from a character card.
+ *
+ * Slots are sent and returned by position ("s1", "s2", ...) rather than by
+ * their placeholder text, so unusual placeholder names cannot collide or upset
+ * the JSON. Returns one string per requested slot, in order; any slot the model
+ * skipped comes back as "".
+ */
+export async function fillBioSlots(
+  provider: AIProvider,
+  keys: ApiKeys,
+  card: CharacterCard,
+  slots: BioSlotRequest[],
+  model?: string,
+  styleGuide?: string
+): Promise<string[]> {
+  if (!slots.length) return [];
+
+  const cardText = [
+    `Name: ${card.name || ''}`,
+    card.description && `Description: ${card.description}`,
+    card.personality && `Personality: ${card.personality}`,
+    card.scenario && `Scenario: ${card.scenario}`,
+    card.tags?.length && `Tags: ${card.tags.join(', ')}`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
+  const slotList = slots
+    .map((s, i) => {
+      const what = s.current ? `replaces "${s.current}"` : `"${s.label}"`;
+      const group = s.group !== undefined ? ` [paragraph ${s.group}]` : '';
+      return `s${i + 1}${group}: ${what}  —  appears as: …${s.context}…`;
+    })
+    .join('\n');
+
+  let prompt = `You are filling in the slots of a public character bio for a roleplay site. The bio is what someone reads before choosing to chat, so it should hook a reader and be accurate to the character.
+
+CHARACTER CARD:
+${cardText}
+
+SLOTS TO FILL (each line shows the slot id, its label, and the surrounding text with ___ where the slot goes):
+${slotList}
+
+RULES:
+- Base every answer on the character card. Do not invent major facts the card contradicts.
+- Size each answer to its slot: a label like "age" or "height" gets a few words; a slot sitting in a paragraph gets a paragraph. Use the surrounding text to judge.
+- Plain text only: no HTML, no markdown, no surrounding quotes.
+- Write about the character in third person, and refer to the reader as {{user}} if you need to.
+- If a slot cannot be answered from the card, make a reasonable, consistent choice rather than leaving it blank.
+- Where a slot says what it replaces, that text is template filler: match its length and its format, keeping separators and punctuation (e.g. "Age・Pronouns・Quirk" becomes "34・he/him・Never says thank you"). A name stays a name; a paragraph stays a paragraph.
+- Filler may be lorem ipsum in another language. Write in the language of the character card, not the filler.
+- Slots marked with the same [paragraph N] sit together and must read as one passage, e.g. a bold lead-in followed by the rest of its sentence.`;
+
+  if (styleGuide) {
+    prompt += `\n\nSTYLE GUIDE (match its voice and tone):\n${styleGuide.slice(0, 6000)}`;
+  }
+
+  prompt += `\n\nRespond with ONLY a JSON object mapping every slot id to its text, e.g. {"s1": "...", "s2": "..."}.`;
+
+  const responseText = await callAIProvider(
+    provider,
+    keys,
+    prompt,
+    'You write character bios for roleplay bots. Output only valid JSON.',
+    true,
+    4000,
+    model
+  );
+
+  const ids = slots.map((_, i) => `s${i + 1}`);
+  const parsed = parseJsonObject(responseText, 'Failed to fill the bio template', ids);
+  return ids.map((id) => (typeof parsed[id] === 'string' ? parsed[id].trim() : ''));
+}
+
 export async function suggestArchetype(
   provider: AIProvider,
   keys: ApiKeys,
