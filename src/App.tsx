@@ -186,6 +186,26 @@ function ApiKeyInput({ id, value, onChange, placeholder, disabled }: { id: strin
   );
 }
 
+function readStoredString(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Parse a stored JSON setting, falling back on absence, corruption or blocked storage. */
+function readStoredJSON<T>(key: string, fallback: T): T {
+  const raw = readStoredString(key);
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export default function App() {
   const [user, loadingAuth, ensureAuth] = useFirebaseAuth();
   const { toasts, notify, dismiss } = useToasts();
@@ -225,8 +245,14 @@ export default function App() {
   const [combinationSuggestion, setCombinationSuggestion] = useState<StyleCombinationSuggestion | null>(null);
   const [isSuggestingCombination, setIsSuggestingCombination] = useState(false);
   
-  const [provider, setProvider] = useState<AIProvider>("gemini");
-  const [apiKeys, setApiKeys] = useState<ApiKeys>({
+  // Settings are read synchronously at construction. Restoring them in a mount
+  // effect instead let the save effects below run first with the defaults and
+  // overwrite storage -- and under StrictMode's double-run that wiped saved API
+  // keys and the chosen provider on every dev reload.
+  const [provider, setProvider] = useState<AIProvider>(
+    () => readStoredString("st_style_provider") || "gemini"
+  );
+  const [apiKeys, setApiKeys] = useState<ApiKeys>(() => ({
     gemini: "",
     anthropic: "",
     openrouter: "",
@@ -234,10 +260,13 @@ export default function App() {
     customEndpoint: "",
     customKey: "",
     customEndpoints: [],
-  });
+    ...readStoredJSON<Partial<ApiKeys>>("st_style_keys", {}),
+  }));
 
-  const [apiModels, setApiModels] = useState<Record<string, string>>({});
-  const [sectionConfigs, setSectionConfigs] = useState<Record<string, { provider: AIProvider; model: string }>>({});
+  const [apiModels, setApiModels] = useState<Record<string, string>>(() => readStoredJSON("st_style_models", {}));
+  const [sectionConfigs, setSectionConfigs] = useState<Record<string, { provider: AIProvider; model: string }>>(
+    () => readStoredJSON("st_section_configs", {})
+  );
   const [availableModels, setAvailableModels] = useState<Record<string, AIModel[]>>({});
   const [isFetchingModels, setIsFetchingModels] = useState<Record<string, boolean>>({});
 
@@ -462,18 +491,6 @@ export default function App() {
 
   // Load saved data
   useEffect(() => {
-    const savedKeys = localStorage.getItem("st_style_keys");
-    if (savedKeys) setApiKeys(JSON.parse(savedKeys));
-
-    const savedModels = localStorage.getItem("st_style_models");
-    if (savedModels) setApiModels(JSON.parse(savedModels));
-
-    const savedSectionConfigs = localStorage.getItem("st_section_configs");
-    if (savedSectionConfigs) setSectionConfigs(JSON.parse(savedSectionConfigs));
-
-    const savedProvider = localStorage.getItem("st_style_provider");
-    if (savedProvider) setProvider(savedProvider as AIProvider);
-
     localforage.getItem("st_forge_draft").catch(e => {
       console.error("Failed to load forge draft", e);
       return null;
